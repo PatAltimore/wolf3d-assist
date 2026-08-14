@@ -29,8 +29,7 @@ jobs:
           if [ ! -d tools/emsdk/upstream ]; then
             rm -rf tools/emsdk
             git clone https://github.com/emscripten-core/emsdk.git tools/emsdk
-            cd tools/emsdk
-            ./emsdk install 6.0.6
+            (cd tools/emsdk && ./emsdk install 6.0.6)
           fi
           cd tools/emsdk
           ./emsdk activate 6.0.6
