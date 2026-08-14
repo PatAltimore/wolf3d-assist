@@ -34,7 +34,7 @@ SRCS=(
 )
 
 CFLAGS="-sUSE_SDL=2 -sUSE_SDL_MIXER=2 -O2 -Wall -Wpointer-arith -Wreturn-type -Wwrite-strings -Wcast-align"
-LDFLAGS="-sASYNCIFY -sINITIAL_MEMORY=64MB -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web --preload-file data@/ -O2"
+LDFLAGS="-sASYNCIFY -sINITIAL_MEMORY=64MB -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web --preload-file data@/ --shell-file ../web/shell.html -O2"
 
 mkdir -p build-em
 mkdir -p data

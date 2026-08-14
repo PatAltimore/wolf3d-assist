@@ -29,7 +29,10 @@ exit_t playstate;
 
 static musicnames lastmusicchunk = (musicnames) 0;
 
-static int DebugOk;
+// Always on in this web build: assist mode drives the built-in debug/cheat
+// keys directly, so the usual Backspace+LShift+Alt unlock + --debugmode
+// flag combo is skipped.
+static int DebugOk = 1;
 
 objtype objlist[MAXACTORS];
 objtype *newobj, *obj, *player, *lastobj, *objfreelist, *killerobj;
@@ -205,7 +208,7 @@ int songs[] = {
     XFUNKIE_MUS,
     XDEATH_MUS,
     XGETYOU_MUS,                // DON'T KNOW
-    ULTIMATE_MUS,               // Trans Gr”sse
+    ULTIMATE_MUS,               // Trans Grï¿½sse
 
     DUNGEON_MUS,
     GOINGAFT_MUS,

@@ -18,4 +18,5 @@ LDFLAGS += -sINITIAL_MEMORY=64MB
 LDFLAGS += -sALLOW_MEMORY_GROWTH=1
 LDFLAGS += -sENVIRONMENT=web
 LDFLAGS += --preload-file data@/
+LDFLAGS += --shell-file ../web/shell.html
 LDFLAGS += -O2

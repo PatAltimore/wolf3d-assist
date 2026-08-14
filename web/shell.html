@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <title>Wolfenstein 3D — Assist Mode</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #14100e;
+      --panel: #1e1815;
+      --panel-border: #3a2c22;
+      --accent: #b0210f;
+      --accent-bright: #e8390f;
+      --text: #e8ddd0;
+      --text-dim: #a3958a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: flex;
+      min-height: 100vh;
+    }
+    .layout {
+      display: flex;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .game-area {
+      flex: 1 1 640px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      min-width: 0;
+    }
+    .game-area h1 {
+      font-size: 18px;
+      margin: 0 0 12px;
+      letter-spacing: 0.02em;
+      color: var(--accent-bright);
+    }
+    #status { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; min-height: 16px; }
+    #progress { width: 300px; }
+    canvas.emscripten {
+      border: 1px solid var(--panel-border);
+      background: #000;
+      max-width: 100%;
+      height: auto;
+    }
+    .assist-panel {
+      flex: 0 0 340px;
+      max-width: 100%;
+      background: var(--panel);
+      border-left: 1px solid var(--panel-border);
+      padding: 16px;
+      overflow-y: auto;
+    }
+    .assist-panel h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin: 20px 0 10px;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 6px;
+    }
+    .assist-panel h2:first-child { margin-top: 0; }
+    .cheat-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    button.assist-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      flex: 1;
+    }
+    button.assist-btn:hover { background: var(--accent-bright); }
+    button.assist-btn:disabled { opacity: 0.5; cursor: default; }
+    select.assist-select {
+      background: #0f0c0a;
+      color: var(--text);
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      padding: 7px;
+      font-size: 13px;
+    }
+    .cheat-desc { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; }
+    .level-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .level-picker select { flex: 1; }
+    .hint-box {
+      background: #0f0c0a;
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      padding: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .hint-box p { margin: 0 0 8px; }
+    .code-link {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--accent-bright);
+      text-decoration: none;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin-top: 4px;
+    }
+    .code-link:hover { background: var(--accent); color: #fff; }
+    .ack-note { font-size: 11px; color: var(--text-dim); margin-top: 16px; }
+    .toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #000;
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="game-area">
+      <h1>WOLFENSTEIN 3D — ASSIST MODE</h1>
+      <div id="status">Downloading...</div>
+      <progress id="progress" hidden max="100" value="0"></progress>
+      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    </div>
+
+    <div class="assist-panel">
+      <h2>Cheats</h2>
+      <div class="cheat-row">
+        <button class="assist-btn" id="cheat-god">Toggle God Mode</button>
+      </div>
+      <div class="cheat-desc">Cycles: invincible → invincible (no flash) → off.</div>
+
+      <div class="cheat-row">
+        <button class="assist-btn" id="cheat-noclip">Toggle No Clip</button>
+      </div>
+      <div class="cheat-desc">Walk through walls.</div>
+
+      <div class="cheat-row">
+        <button class="assist-btn" id="cheat-items">Give All Weapons + Ammo</button>
+      </div>
+      <div class="cheat-desc">Also heals to full and adds points.</div>
+
+      <div class="cheat-row">
+        <select class="assist-select" id="warp-level"></select>
+        <button class="assist-btn" id="cheat-warp">Warp</button>
+      </div>
+      <div class="cheat-desc">Jump straight to a floor.</div>
+
+      <div class="cheat-row">
+        <button class="assist-btn" id="cheat-map">Show Overhead Map</button>
+      </div>
+      <div class="cheat-desc">Reveals the current floor layout.</div>
+
+      <p class="ack-note">These trigger Wolf3D's own built-in debug keys (Tab+letter) — the same ones id Software shipped in 1992, just wired to buttons.</p>
+
+      <h2>Level Hints</h2>
+      <div class="level-picker">
+        <label for="hint-level">Floor:</label>
+        <select class="assist-select" id="hint-level"></select>
+      </div>
+      <div class="hint-box" id="hint-box"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Assist mode data ----
+    var CODE_MUSEUM_BASE = "https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d/";
+
+    var HINTS = [
+      { level: 1, text: "Guard patrol routes are simple fixed loops until they spot you — walking along walls instead of open floors keeps you out of more sightlines.", slug: "wl-act1-c", label: "Guard patrol & sighting logic" },
+      { level: 2, text: "Not every wall is really a wall. A handful of tiles per floor are pushable and hide side rooms with extra treasure and ammo.", slug: "wl-play-c", label: "Pushwall / secret handling" },
+      { level: 3, text: "Locked doors open with a matching colored key, picked up elsewhere on the floor — check dead-end rooms first.", slug: "wl-agent-c", label: "Player pickups & door interaction" },
+      { level: 4, text: "Dogs move faster than guards and give no warning bark — treat kennels as a threat before you're in the room.", slug: "wl-act2-c", label: "Dog & guard attack behavior" },
+      { level: 5, text: "Sound travels: firing an unsilenced shot alerts nearby guards through walls. Knife kills on isolated guards stay quiet.", slug: "wl-act1-c", label: "Guard alert / hearing logic" },
+      { level: 6, text: "The floor layout gets mazier here — the raycaster only draws what's in direct line of sight, so use the overhead cheat if you get turned around.", slug: "wl-draw-c", label: "Raycasting wall renderer" },
+      { level: 7, text: "SS troops take more hits than regular guards and hit harder — line them up in corridors rather than open rooms.", slug: "wl-act2-c", label: "SS guard behavior" },
+      { level: 8, text: "Ammo gets tight around here. Knife-only kills on lone guards save bullets for rooms with groups.", slug: "wl-agent-c", label: "Weapon & ammo handling" },
+      { level: 9, text: "This floor is dense with secrets relative to its size — push on suspiciously plain wall segments near dead ends.", slug: "wl-play-c", label: "Pushwall / secret handling" },
+      { level: 10, text: "Boss floor: Hans Grösse has a lot of health and hits hard at range. Strafing around pillars breaks his line of sight between bursts.", slug: "wl-act2-c", label: "Boss (Hans Grösse) behavior" }
+    ];
+
+    function codeMuseumLink(slug) {
+      return CODE_MUSEUM_BASE + slug;
+    }
+
+    // ---- Level pickers ----
+    var warpSelect = document.getElementById("warp-level");
+    var hintSelect = document.getElementById("hint-level");
+    for (var i = 1; i <= 10; i++) {
+      var o1 = document.createElement("option"); o1.value = i; o1.textContent = "Floor " + i;
+      warpSelect.appendChild(o1);
+      var o2 = document.createElement("option"); o2.value = i; o2.textContent = "Floor " + i;
+      hintSelect.appendChild(o2);
+    }
+
+    function renderHint() {
+      var lvl = parseInt(hintSelect.value, 10);
+      var h = HINTS.find(function (x) { return x.level === lvl; });
+      var box = document.getElementById("hint-box");
+      if (!h) { box.innerHTML = "<p>No hint for this floor yet.</p>"; return; }
+      box.innerHTML = "<p>" + h.text + "</p>" +
+        "<a class=\"code-link\" target=\"_blank\" rel=\"noopener\" href=\"" + codeMuseumLink(h.slug) + "\">See the code: " + h.label + " →</a>";
+    }
+    hintSelect.addEventListener("change", renderHint);
+    hintSelect.value = "1";
+    renderHint();
+
+    // ---- Toast ----
+    var toastTimer = null;
+    function toast(msg) {
+      var t = document.getElementById("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { t.classList.remove("show"); }, 1600);
+    }
+
+    // ---- Synthetic keyboard bridge into the SDL2/Emscripten engine ----
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    function dispatchKey(type, code, key, keyCode) {
+      var ev = new KeyboardEvent(type, { key: key, code: code, bubbles: true, cancelable: true });
+      try {
+        Object.defineProperty(ev, "keyCode", { get: function () { return keyCode; } });
+        Object.defineProperty(ev, "which", { get: function () { return keyCode; } });
+      } catch (e) {}
+      var canvas = document.getElementById("canvas");
+      document.dispatchEvent(ev);
+      canvas.dispatchEvent(ev);
+    }
+
+    var KEYS = {
+      Tab: ["Tab", "Tab", 9],
+      Enter: ["Enter", "Enter", 13],
+      Space: ["Space", " ", 32],
+      G: ["KeyG", "g", 71],
+      N: ["KeyN", "n", 78],
+      I: ["KeyI", "i", 73],
+      W: ["KeyW", "w", 87],
+      O: ["KeyO", "o", 79]
+    };
+    for (var d = 0; d <= 9; d++) {
+      KEYS["Digit" + d] = ["Digit" + d, String(d), 48 + d];
+    }
+
+    async function tap(name, holdMs) {
+      var k = KEYS[name];
+      dispatchKey("keydown", k[0], k[1], k[2]);
+      await sleep(holdMs || 70);
+      dispatchKey("keyup", k[0], k[1], k[2]);
+    }
+
+    // Runs a Tab+<letter> debug combo. `ack` dismisses the resulting
+    // IN_Ack()-blocked message box; `digits` types a follow-up number
+    // (for Warp / Give Key, which read input via US_LineInput + Enter
+    // instead of calling IN_Ack()).
+    async function runDebugCheat(letterName, opts) {
+      opts = opts || {};
+      document.getElementById("canvas").focus();
+      var k = KEYS.Tab;
+      dispatchKey("keydown", k[0], k[1], k[2]); // hold Tab
+      await sleep(60);
+      await tap(letterName);
+
+      if (opts.digits) {
+        for (var i = 0; i < opts.digits.length; i++) {
+          await sleep(70);
+          await tap("Digit" + opts.digits[i]);
+        }
+        await sleep(70);
+        await tap("Enter");
+      }
+
+      await sleep(60);
+      dispatchKey("keyup", k[0], k[1], k[2]); // release Tab
+
+      if (opts.ack) {
+        await sleep(80);
+        await tap("Space"); // dismiss the IN_Ack() message box
+      }
+    }
+
+    document.getElementById("cheat-god").addEventListener("click", function () {
+      runDebugCheat("G", { ack: true });
+      toast("God mode toggled");
+    });
+    document.getElementById("cheat-noclip").addEventListener("click", function () {
+      runDebugCheat("N", { ack: true });
+      toast("No clip toggled");
+    });
+    document.getElementById("cheat-items").addEventListener("click", function () {
+      runDebugCheat("I", { ack: true });
+      toast("Gave weapons, ammo & health");
+    });
+    document.getElementById("cheat-map").addEventListener("click", function () {
+      runDebugCheat("O", { ack: true });
+      toast("Showing overhead map");
+    });
+    document.getElementById("cheat-warp").addEventListener("click", function () {
+      var lvl = warpSelect.value;
+      runDebugCheat("W", { digits: lvl.split("") });
+      toast("Warping to floor " + lvl);
+    });
+
+    // ---- Emscripten module wiring ----
+    var statusElement = document.getElementById("status");
+    var progressElement = document.getElementById("progress");
+    var canvasElement = document.getElementById("canvas");
+
+    canvasElement.addEventListener("webglcontextlost", function (e) {
+      alert("WebGL context lost. You will need to reload the page.");
+      e.preventDefault();
+    }, false);
+
+    var setStatus = function (text) {
+      if (!setStatus.last) setStatus.last = { time: Date.now(), text: "" };
+      if (text === setStatus.last.text) return;
+      var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+      var now = Date.now();
+      if (m && now - setStatus.last.time < 30) return;
+      setStatus.last.time = now;
+      setStatus.last.text = text;
+      if (m) {
+        progressElement.value = parseInt(m[2]) * 100;
+        progressElement.max = parseInt(m[4]) * 100;
+        progressElement.hidden = false;
+      } else {
+        progressElement.value = null;
+        progressElement.max = null;
+        progressElement.hidden = true;
+      }
+      statusElement.innerHTML = text;
+    };
+
+    var Module = {
+      canvas: canvasElement,
+      setStatus: setStatus,
+      totalDependencies: 0,
+      monitorRunDependencies: function (left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        setStatus(left ? "Preparing... (" + (this.totalDependencies - left) + "/" + this.totalDependencies + ")" : "All downloads complete.");
+      }
+    };
+    setStatus("Downloading...");
+    window.onerror = function () {
+      setStatus("Exception thrown, see JavaScript console");
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
