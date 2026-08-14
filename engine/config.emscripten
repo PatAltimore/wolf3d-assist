@@ -1,0 +1,21 @@
+# Emscripten build config for wolf4sdl, used via:
+#   make CONFIG=config.emscripten CC=emcc CXX=em++
+#
+# Bypasses the native pkg-config SDL detection (Emscripten ships its own
+# SDL2/SDL2_mixer ports, fetched automatically by -sUSE_SDL flags below).
+SDL_CONFIG :=
+CFLAGS_SDL :=
+LDFLAGS_SDL :=
+
+BINARY := index.html
+
+CFLAGS += -sUSE_SDL=2
+CFLAGS += -sUSE_SDL_MIXER=2
+CFLAGS += -O2
+
+LDFLAGS += -sASYNCIFY
+LDFLAGS += -sINITIAL_MEMORY=64MB
+LDFLAGS += -sALLOW_MEMORY_GROWTH=1
+LDFLAGS += -sENVIRONMENT=web
+LDFLAGS += --preload-file data@/
+LDFLAGS += -O2
