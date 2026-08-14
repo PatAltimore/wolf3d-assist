@@ -98,6 +98,29 @@
       border-bottom: 2px solid var(--bevel-dark);
     }
     .assist-panel h2:first-child { margin-top: 0; }
+    .cheats-details { margin: 0 0 8px; }
+    .cheats-details summary {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--white);
+      background: var(--blue);
+      margin: 0 -14px 10px;
+      padding: 6px 14px;
+      border-top: 1px solid var(--blue-bright);
+      border-bottom: 2px solid var(--bevel-dark);
+      cursor: pointer;
+      list-style: none;
+    }
+    .cheats-details summary::-webkit-details-marker { display: none; }
+    .cheats-details summary::before { content: "▸ "; }
+    .cheats-details[open] summary::before { content: "▾ "; }
+    .cheat-row-compact {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .cheat-row-compact .assist-btn { font-size: 11px; padding: 8px 6px; }
     .cheat-row {
       display: flex;
       align-items: center;
@@ -193,35 +216,22 @@
     </div>
 
     <div class="assist-panel">
-      <h2>Cheats</h2>
-      <div class="cheat-row">
-        <button class="assist-btn" id="cheat-god">Toggle God Mode</button>
-      </div>
-      <div class="cheat-desc">Cycles: invincible → invincible (no flash) → off.</div>
-
-      <div class="cheat-row">
-        <button class="assist-btn" id="cheat-noclip">Toggle No Clip</button>
-      </div>
-      <div class="cheat-desc">Walk through walls.</div>
-
-      <div class="cheat-row">
-        <button class="assist-btn" id="cheat-items">Give All Weapons + Ammo</button>
-      </div>
-      <div class="cheat-desc">Also heals to full and adds points.</div>
-
-      <div class="cheat-row">
-        <select class="assist-select" id="warp-level"></select>
-        <button class="assist-btn" id="cheat-warp">Warp</button>
-      </div>
-      <div class="cheat-desc">Jump straight to a floor.</div>
-
-      <div class="cheat-row">
-        <button class="assist-btn" id="cheat-map">Show Overhead Map</button>
-      </div>
-      <div class="cheat-desc">
-        A genuine 1992 developer debug view (Tab+O) of the floor's raw tile data — not a designed-for-players minimap, so it's just color-coded blocks with no in-game legend.
+      <details class="cheats-details">
+        <summary>Cheats</summary>
+        <div class="cheat-row-compact">
+          <button class="assist-btn" id="cheat-god" title="Cycles: invincible → invincible (no flash) → off.">God Mode</button>
+          <button class="assist-btn" id="cheat-noclip" title="Walk through walls.">No Clip</button>
+        </div>
+        <div class="cheat-row-compact">
+          <button class="assist-btn" id="cheat-items" title="Full weapons, ammo, health, and points.">Give All</button>
+          <button class="assist-btn" id="cheat-map" title="A genuine 1992 developer debug view (Tab+O) of the floor's raw tile data.">Overhead Map</button>
+        </div>
+        <div class="cheat-row">
+          <select class="assist-select" id="warp-level"></select>
+          <button class="assist-btn" id="cheat-warp">Warp</button>
+        </div>
         <details class="map-legend">
-          <summary>What am I looking at? (map legend)</summary>
+          <summary>Map legend</summary>
           <ul>
             <li>Brightest square — you</li>
             <li>Solid red-toned squares — enemies</li>
@@ -232,21 +242,10 @@
             <li>Distinctly-colored squares — secret pushwalls</li>
           </ul>
         </details>
-      </div>
+        <p class="ack-note">Real Wolf3D debug keys (Tab+letter) wired to buttons.</p>
+      </details>
 
-      <p class="ack-note">These trigger Wolf3D's own built-in debug keys (Tab+letter) — the same ones id Software shipped in 1992, just wired to buttons.</p>
-
-      <h2>Level Hints</h2>
-      <div class="level-picker">
-        <label for="hint-level">Floor:</label>
-        <select class="assist-select" id="hint-level"></select>
-      </div>
-      <div class="cheat-row" style="margin-bottom: 10px;">
-        <label style="font-size: 12px; display: flex; align-items: center; gap: 6px;">
-          <input type="checkbox" id="hint-sync" checked>
-          Follow my current floor
-        </label>
-      </div>
+      <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
       <div class="hint-box" id="hint-box"></div>
     </div>
   </div>
@@ -326,51 +325,40 @@
       return CODE_MUSEUM_BASE + slug;
     }
 
-    // ---- Level pickers ----
+    // ---- Warp target picker (Cheats section only) ----
     var warpSelect = document.getElementById("warp-level");
-    var hintSelect = document.getElementById("hint-level");
-    var hintSync = document.getElementById("hint-sync");
     for (var i = 1; i <= 10; i++) {
       var o1 = document.createElement("option"); o1.value = i; o1.textContent = "Floor " + i;
       warpSelect.appendChild(o1);
-      var o2 = document.createElement("option"); o2.value = i; o2.textContent = "Floor " + i;
-      hintSelect.appendChild(o2);
     }
 
-    function renderHint() {
-      var lvl = parseInt(hintSelect.value, 10);
+    function renderHint(lvl) {
       var h = HINTS.find(function (x) { return x.level === lvl; });
       var box = document.getElementById("hint-box");
+      document.getElementById("current-floor").textContent = lvl;
       if (!h) { box.innerHTML = "<p>No hints for this floor yet.</p>"; return; }
       box.innerHTML = h.tips.map(function (t) {
         return "<p>" + t.text + "</p>" +
           "<a class=\"code-link\" target=\"_blank\" rel=\"noopener\" href=\"" + codeMuseumLink(t.slug) + "\">See the code: " + t.label + " →</a>";
       }).join("<hr style=\"border-color: var(--panel-border); margin: 10px 0;\">");
     }
-    hintSelect.addEventListener("change", function () {
-      // Manually picking a floor implies you want to browse, not follow.
-      hintSync.checked = false;
-      renderHint();
-    });
-    hintSelect.value = "1";
+    renderHint(1);
 
-    // Polls the engine's actual current floor (see assist_get_current_level
-    // in wl_game.cpp) and keeps the hints panel following it, as long as
-    // the player hasn't manually picked a different floor to browse.
+    // Always follows the engine's actual current floor (see
+    // assist_get_current_level in wl_game.cpp) -- polled since there's no
+    // push notification from the C side.
     var lastSyncedLevel = null;
     function pollCurrentLevel() {
-      if (!hintSync.checked || typeof Module === "undefined" || !Module.ccall) return;
+      if (typeof Module === "undefined" || !Module.ccall) return;
       try {
         var lvl = Module.ccall("assist_get_current_level", "number", [], []);
         if (lvl >= 1 && lvl <= 10 && lvl !== lastSyncedLevel) {
           lastSyncedLevel = lvl;
-          hintSelect.value = lvl;
-          renderHint();
+          renderHint(lvl);
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
     setInterval(pollCurrentLevel, 1000);
-    renderHint();
 
     // ---- Toast ----
     var toastTimer = null;
