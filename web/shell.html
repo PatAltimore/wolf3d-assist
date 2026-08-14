@@ -47,8 +47,10 @@
     canvas.emscripten {
       border: 1px solid var(--panel-border);
       background: #000;
-      max-width: 100%;
-      height: auto;
+      width: 100% !important;
+      height: auto !important;
+      max-width: 1100px;
+      image-rendering: pixelated;
     }
     .assist-panel {
       flex: 0 0 340px;

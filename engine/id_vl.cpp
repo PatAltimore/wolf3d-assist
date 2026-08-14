@@ -17,8 +17,8 @@
 
 boolean fullscreen = false;
 boolean aspect = true; // [FG] aspect ratio correction
-unsigned screenWidth = 640;
-unsigned screenHeight = 400;
+unsigned screenWidth = 1280;
+unsigned screenHeight = 800;
 int screenBits = -1;      // use "best" color depth according to libSDL
 
 SDL_Window *window;
