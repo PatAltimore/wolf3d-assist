@@ -19,4 +19,6 @@ LDFLAGS += -sALLOW_MEMORY_GROWTH=1
 LDFLAGS += -sENVIRONMENT=web
 LDFLAGS += --preload-file data@/
 LDFLAGS += --shell-file ../web/shell.html
+LDFLAGS += -sEXPORTED_FUNCTIONS=_main,_assist_get_current_level
+LDFLAGS += -sEXPORTED_RUNTIME_METHODS=ccall,cwrap
 LDFLAGS += -O2

@@ -132,6 +132,10 @@
       font-size: 12px;
     }
     .cheat-desc { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; }
+    .map-legend { margin-top: 6px; }
+    .map-legend summary { cursor: pointer; color: var(--blue-bright); }
+    .map-legend ul { margin: 6px 0 0; padding-left: 16px; }
+    .map-legend li { margin-bottom: 3px; }
     .level-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
     .level-picker select { flex: 1; }
     .hint-box {
@@ -214,7 +218,21 @@
       <div class="cheat-row">
         <button class="assist-btn" id="cheat-map">Show Overhead Map</button>
       </div>
-      <div class="cheat-desc">Reveals the current floor layout.</div>
+      <div class="cheat-desc">
+        A genuine 1992 developer debug view (Tab+O) of the floor's raw tile data — not a designed-for-players minimap, so it's just color-coded blocks with no in-game legend.
+        <details class="map-legend">
+          <summary>What am I looking at? (map legend)</summary>
+          <ul>
+            <li>Brightest square — you</li>
+            <li>Solid red-toned squares — enemies</li>
+            <li>Gray squares — walls</li>
+            <li>Brown squares — doors</li>
+            <li>Lighter floor squares — areas you've already seen</li>
+            <li>Black squares — unexplored floor</li>
+            <li>Distinctly-colored squares — secret pushwalls</li>
+          </ul>
+        </details>
+      </div>
 
       <p class="ack-note">These trigger Wolf3D's own built-in debug keys (Tab+letter) — the same ones id Software shipped in 1992, just wired to buttons.</p>
 
@@ -222,6 +240,12 @@
       <div class="level-picker">
         <label for="hint-level">Floor:</label>
         <select class="assist-select" id="hint-level"></select>
+      </div>
+      <div class="cheat-row" style="margin-bottom: 10px;">
+        <label style="font-size: 12px; display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="hint-sync" checked>
+          Follow my current floor
+        </label>
       </div>
       <div class="hint-box" id="hint-box"></div>
     </div>
@@ -256,16 +280,46 @@
     var CODE_MUSEUM_BASE = "https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d/";
 
     var HINTS = [
-      { level: 1, text: "Guard patrol routes are simple fixed loops until they spot you — walking along walls instead of open floors keeps you out of more sightlines.", slug: "wl-act1-c", label: "Guard patrol & sighting logic" },
-      { level: 2, text: "Not every wall is really a wall. A handful of tiles per floor are pushable and hide side rooms with extra treasure and ammo.", slug: "wl-play-c", label: "Pushwall / secret handling" },
-      { level: 3, text: "Locked doors open with a matching colored key, picked up elsewhere on the floor — check dead-end rooms first.", slug: "wl-agent-c", label: "Player pickups & door interaction" },
-      { level: 4, text: "Dogs move faster than guards and give no warning bark — treat kennels as a threat before you're in the room.", slug: "wl-act2-c", label: "Dog & guard attack behavior" },
-      { level: 5, text: "Sound travels: firing an unsilenced shot alerts nearby guards through walls. Knife kills on isolated guards stay quiet.", slug: "wl-act1-c", label: "Guard alert / hearing logic" },
-      { level: 6, text: "The floor layout gets mazier here — the raycaster only draws what's in direct line of sight, so use the overhead cheat if you get turned around.", slug: "wl-draw-c", label: "Raycasting wall renderer" },
-      { level: 7, text: "SS troops take more hits than regular guards and hit harder — line them up in corridors rather than open rooms.", slug: "wl-act2-c", label: "SS guard behavior" },
-      { level: 8, text: "Ammo gets tight around here. Knife-only kills on lone guards save bullets for rooms with groups.", slug: "wl-agent-c", label: "Weapon & ammo handling" },
-      { level: 9, text: "This floor is dense with secrets relative to its size — push on suspiciously plain wall segments near dead ends.", slug: "wl-play-c", label: "Pushwall / secret handling" },
-      { level: 10, text: "Boss floor: Hans Grösse has a lot of health and hits hard at range. Strafing around pillars breaks his line of sight between bursts.", slug: "wl-act2-c", label: "Boss (Hans Grösse) behavior" }
+      { level: 1, tips: [
+        { text: "Guard patrol routes are simple fixed loops until they spot you — walking along walls instead of open floors keeps you out of more sightlines.", slug: "wl-act1-c", label: "Guard patrol & sighting logic" },
+        { text: "Every texture and sound on this floor was loaded into memory before you took a step — Wolf3D caches a level's whole asset set upfront rather than streaming it in.", slug: "id-ca-c", label: "Asset caching" }
+      ]},
+      { level: 2, tips: [
+        { text: "Not every wall is really a wall. A handful of tiles per floor are pushable and hide side rooms with extra treasure and ammo.", slug: "wl-play-c", label: "Pushwall / secret handling" },
+        { text: "Every vertical strip of wall you see is drawn independently, one ray per screen column — that's the raycasting technique in a nutshell.", slug: "wl-scale-c", label: "Column-scaling renderer" }
+      ]},
+      { level: 3, tips: [
+        { text: "Locked doors open with a matching colored key, picked up elsewhere on the floor — check dead-end rooms first.", slug: "wl-agent-c", label: "Player pickups & door interaction" },
+        { text: "Getting hit briefly tints the whole screen red by swapping the VGA color palette, not by redrawing anything — instant even on 1992 hardware.", slug: "id-vl-c", label: "Palette-based damage flash" }
+      ]},
+      { level: 4, tips: [
+        { text: "Dogs move faster than guards and give no warning bark — treat kennels as a threat before you're in the room.", slug: "wl-act2-c", label: "Dog & guard attack behavior" },
+        { text: "Every enemy runs the same generic think-function loop each tic; only a state table's data differs between a guard, a dog, and a boss.", slug: "wl-state-c", label: "Actor state machine" }
+      ]},
+      { level: 5, tips: [
+        { text: "Sound travels: firing an unsilenced shot alerts nearby guards through walls. Knife kills on isolated guards stay quiet.", slug: "wl-act1-c", label: "Guard alert / hearing logic" },
+        { text: "Interrupt-driven playback lets gunfire and footsteps play without stalling the game loop — a big deal on the original 286/386 hardware.", slug: "id-sd-c", label: "Interrupt-driven sound" }
+      ]},
+      { level: 6, tips: [
+        { text: "The floor layout gets mazier here — the raycaster only draws what's in direct line of sight, so use the overhead cheat if you get turned around.", slug: "wl-draw-c", label: "Raycasting wall renderer" },
+        { text: "The entire game — input, AI, rendering — is driven from one central loop that ticks all three every frame.", slug: "wl-main-c", label: "Main game loop" }
+      ]},
+      { level: 7, tips: [
+        { text: "SS troops take more hits than regular guards and hit harder — line them up in corridors rather than open rooms.", slug: "wl-act2-c", label: "SS guard behavior" },
+        { text: "Controls stay responsive because input is polled fresh each frame rather than reacting to a queue of individual key events.", slug: "id-in-c", label: "Input polling" }
+      ]},
+      { level: 8, tips: [
+        { text: "Ammo gets tight around here. Knife-only kills on lone guards save bullets for rooms with groups.", slug: "wl-agent-c", label: "Weapon & ammo handling" },
+        { text: "Your position, angle, and door interactions are all tracked in the same file dedicated purely to the player's own state.", slug: "wl-agent-c", label: "Player agent" }
+      ]},
+      { level: 9, tips: [
+        { text: "This floor is dense with secrets relative to its size — push on suspiciously plain wall segments near dead ends.", slug: "wl-play-c", label: "Pushwall / secret handling" },
+        { text: "A far-heap memory manager built for 1990s DOS's tiny address space is still quietly managing every asset, even though your browser has gigabytes free.", slug: "id-mm-c", label: "Memory manager" }
+      ]},
+      { level: 10, tips: [
+        { text: "Boss floor: Hans Grösse has a lot of health and hits hard at range. Strafing around pillars breaks his line of sight between bursts.", slug: "wl-act2-c", label: "Boss (Hans Grösse) behavior" },
+        { text: "Clearing this floor hands off to the intermission code, which tallies your kill/secret/treasure percentages before the next episode text.", slug: "wl-inter-c", label: "Intermission screen" }
+      ]}
     ];
 
     function codeMuseumLink(slug) {
@@ -275,6 +329,7 @@
     // ---- Level pickers ----
     var warpSelect = document.getElementById("warp-level");
     var hintSelect = document.getElementById("hint-level");
+    var hintSync = document.getElementById("hint-sync");
     for (var i = 1; i <= 10; i++) {
       var o1 = document.createElement("option"); o1.value = i; o1.textContent = "Floor " + i;
       warpSelect.appendChild(o1);
@@ -286,12 +341,35 @@
       var lvl = parseInt(hintSelect.value, 10);
       var h = HINTS.find(function (x) { return x.level === lvl; });
       var box = document.getElementById("hint-box");
-      if (!h) { box.innerHTML = "<p>No hint for this floor yet.</p>"; return; }
-      box.innerHTML = "<p>" + h.text + "</p>" +
-        "<a class=\"code-link\" target=\"_blank\" rel=\"noopener\" href=\"" + codeMuseumLink(h.slug) + "\">See the code: " + h.label + " →</a>";
+      if (!h) { box.innerHTML = "<p>No hints for this floor yet.</p>"; return; }
+      box.innerHTML = h.tips.map(function (t) {
+        return "<p>" + t.text + "</p>" +
+          "<a class=\"code-link\" target=\"_blank\" rel=\"noopener\" href=\"" + codeMuseumLink(t.slug) + "\">See the code: " + t.label + " →</a>";
+      }).join("<hr style=\"border-color: var(--panel-border); margin: 10px 0;\">");
     }
-    hintSelect.addEventListener("change", renderHint);
+    hintSelect.addEventListener("change", function () {
+      // Manually picking a floor implies you want to browse, not follow.
+      hintSync.checked = false;
+      renderHint();
+    });
     hintSelect.value = "1";
+
+    // Polls the engine's actual current floor (see assist_get_current_level
+    // in wl_game.cpp) and keeps the hints panel following it, as long as
+    // the player hasn't manually picked a different floor to browse.
+    var lastSyncedLevel = null;
+    function pollCurrentLevel() {
+      if (!hintSync.checked || typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var lvl = Module.ccall("assist_get_current_level", "number", [], []);
+        if (lvl >= 1 && lvl <= 10 && lvl !== lastSyncedLevel) {
+          lastSyncedLevel = lvl;
+          hintSelect.value = lvl;
+          renderHint();
+        }
+      } catch (e) { /* engine not ready yet -- try again next tick */ }
+    }
+    setInterval(pollCurrentLevel, 1000);
     renderHint();
 
     // ---- Toast ----

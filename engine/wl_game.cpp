@@ -30,6 +30,16 @@ boolean         ingame,fizzlein;
 gametype        gamestate;
 byte            bordercol=VIEWCOLOR;        // color of the Change View/Ingame border
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// Lets the assist-mode UI (web/shell.html) sync its hints panel to
+// whatever floor is actually being played, instead of a manual guess.
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_current_level(void)
+{
+    return gamestate.mapon + 1;
+}
+#endif
+
 #ifdef SPEAR
 int32_t         spearx,speary;
 unsigned        spearangle;
