@@ -57,16 +57,23 @@
     }
     #status { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; min-height: 14px; }
     #progress { width: 300px; }
-    canvas.emscripten {
-      display: block;
+    /* Sized explicitly by JS (see sizeCanvasWrap below) before the engine
+       initializes -- Wolf4SDL's SDL_WINDOW_RESIZABLE flag makes Emscripten
+       auto-detect the canvas's CSS size to pick the SDL window resolution,
+       so it must already have a real, non-zero size at that point instead
+       of relying on CSS auto/intrinsic sizing (which starts at 0 and
+       causes the engine to lock onto a tiny resolution). */
+    .canvas-wrap {
       border: 3px solid var(--bevel-light);
       border-right-color: var(--bevel-dark);
       border-bottom-color: var(--bevel-dark);
       background: #000;
-      width: auto !important;
-      height: auto !important;
-      max-width: 100% !important;
-      max-height: calc(100vh - 60px) !important;
+      line-height: 0;
+    }
+    canvas.emscripten {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
       image-rendering: pixelated;
     }
     .assist-panel {
@@ -176,7 +183,9 @@
       <h1>WOLFENSTEIN 3D — ASSIST MODE</h1>
       <div id="status">Downloading...</div>
       <progress id="progress" hidden max="100" value="0"></progress>
-      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+      <div class="canvas-wrap" id="canvas-wrap">
+        <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
+      </div>
     </div>
 
     <div class="assist-panel">
@@ -221,6 +230,28 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    // ---- Canvas sizing (must run before the engine initializes -- see
+    // the .canvas-wrap comment in <style> for why) ----
+    var GAME_RATIO = 1280 / 800;
+    function sizeCanvasWrap() {
+      var wrap = document.getElementById("canvas-wrap");
+      var gameArea = document.querySelector(".game-area");
+      var chrome = document.querySelector(".game-area h1").offsetHeight +
+                   document.getElementById("status").offsetHeight + 24;
+      var availW = gameArea.clientWidth - 16;
+      var availH = window.innerHeight - chrome - 16;
+      var w = Math.max(availW, 320);
+      var h = w / GAME_RATIO;
+      if (h > availH && availH > 0) {
+        h = Math.max(availH, 200);
+        w = h * GAME_RATIO;
+      }
+      wrap.style.width = Math.floor(w) + "px";
+      wrap.style.height = Math.floor(h) + "px";
+    }
+    sizeCanvasWrap();
+    window.addEventListener("resize", sizeCanvasWrap);
+
     // ---- Assist mode data ----
     var CODE_MUSEUM_BASE = "https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d/";
 

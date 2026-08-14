@@ -4,6 +4,6 @@
     ".data": "application/octet-stream"
   },
   "globalHeaders": {
-    "Cache-Control": "public, max-age=3600"
+    "Cache-Control": "no-cache, must-revalidate"
   }
 }
