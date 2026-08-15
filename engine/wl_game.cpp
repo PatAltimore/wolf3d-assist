@@ -53,11 +53,33 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_current_level(void)
 
 static byte assist_map_buf[MAPSIZE * MAPSIZE];
 
+// spotvis is transient: ThreeDRefresh() clears it and rebuilds it from
+// scratch every single frame, so it only ever reflects the current
+// facing cone. This buffer accumulates it into a permanent record of
+// every tile that's ever been visible, giving an actual explored trail
+// instead of a spotlight. Cleared on each new level (assist_reset_explored,
+// called from SetupGameLevel) and updated every frame (assist_accumulate_seen,
+// called from ThreeDRefresh in wl_draw.cpp, right before it clears spotvis).
+static byte assist_ever_seen[MAPSIZE][MAPSIZE];
+
+void assist_reset_explored(void)
+{
+    memset(assist_ever_seen, 0, sizeof(assist_ever_seen));
+}
+
+void assist_accumulate_seen(void)
+{
+    for (int x = 0; x < MAPSIZE; x++)
+        for (int y = 0; y < MAPSIZE; y++)
+            if (spotvis[x][y])
+                assist_ever_seen[x][y] = 1;
+}
+
 static bool assist_tile_seen(int x, int y)
 {
     if (x < 0 || y < 0 || x >= MAPSIZE || y >= MAPSIZE)
         return false;
-    return spotvis[x][y] != 0;
+    return assist_ever_seen[x][y] != 0 || spotvis[x][y] != 0;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
@@ -699,6 +721,9 @@ void SetupGameLevel (void)
     word *map;
     word tile;
 
+#ifdef __EMSCRIPTEN__
+    assist_reset_explored();
+#endif
 
     if (!loadedgame)
     {

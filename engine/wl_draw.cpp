@@ -1565,11 +1565,19 @@ void CalcViewVariables()
 ========================
 */
 
+#ifdef __EMSCRIPTEN__
+void assist_accumulate_seen(void); // wl_game.cpp -- folds this frame's
+                                    // spotvis into the persistent explored map
+#endif
+
 void    ThreeDRefresh (void)
 {
 //
 // clear out the traced array
 //
+#ifdef __EMSCRIPTEN__
+    assist_accumulate_seen();
+#endif
     memset(spotvis,0,maparea);
     spotvis[player->tilex][player->tiley] = 1;       // Detect all sprites over player fix
 

@@ -426,16 +426,20 @@
           var cx = px * cell + cell / 2, cy = py * cell + cell / 2;
           var rad = (pangle * Math.PI) / 180;
           var dx = Math.cos(rad), dy = -Math.sin(rad);
-          mapCtx.strokeStyle = "#ffffff";
-          mapCtx.lineWidth = Math.max(cell * 0.25, 1);
-          mapCtx.beginPath();
-          mapCtx.moveTo(cx, cy);
-          mapCtx.lineTo(cx + dx * cell * 2.5, cy + dy * cell * 2.5);
-          mapCtx.stroke();
+          var px_ = -dy, py_ = dx; // perpendicular, for the arrow's base corners
+          var len = Math.max(cell * 1.4, 7);
+          var wid = Math.max(cell * 0.9, 5);
+          var tipX = cx + dx * len * 0.65, tipY = cy + dy * len * 0.65;
+          var backCx = cx - dx * len * 0.35, backCy = cy - dy * len * 0.35;
+          var leftX = backCx + px_ * wid * 0.5, leftY = backCy + py_ * wid * 0.5;
+          var rightX = backCx - px_ * wid * 0.5, rightY = backCy - py_ * wid * 0.5;
 
           mapCtx.fillStyle = "#ffffff";
           mapCtx.beginPath();
-          mapCtx.arc(cx, cy, Math.max(cell * 0.6, 2), 0, Math.PI * 2);
+          mapCtx.moveTo(tipX, tipY);
+          mapCtx.lineTo(leftX, leftY);
+          mapCtx.lineTo(rightX, rightY);
+          mapCtx.closePath();
           mapCtx.fill();
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
