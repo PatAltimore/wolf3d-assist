@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>Wolfenstein 3D — Assist Mode</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
@@ -27,7 +30,7 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: 'Courier New', Consolas, monospace;
+      font-family: 'VT323', 'Courier New', Consolas, monospace;
       display: flex;
       height: 100vh;
       overflow: hidden;
@@ -49,13 +52,13 @@
       background: var(--stone-dark);
     }
     .game-area h1 {
-      font-size: 14px;
+      font-size: 18px;
       margin: 0 0 6px;
       letter-spacing: 0.08em;
       color: var(--white);
       text-shadow: 1px 1px 0 var(--bevel-dark);
     }
-    #status { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; min-height: 14px; }
+    #status { font-size: 15px; color: var(--text-dim); margin-bottom: 4px; min-height: 14px; }
     #progress { width: 300px; }
     /* Sized explicitly by JS (see sizeCanvasWrap below) before the engine
        initializes -- Wolf4SDL's SDL_WINDOW_RESIZABLE flag makes Emscripten
@@ -87,7 +90,7 @@
       overflow-y: auto;
     }
     .assist-panel h2 {
-      font-size: 12px;
+      font-size: 16px;
       text-transform: uppercase;
       letter-spacing: 0.12em;
       color: var(--white);
@@ -100,7 +103,7 @@
     .assist-panel h2:first-child { margin-top: 0; }
     .cheats-details { margin: 0 0 8px; }
     .cheats-details summary {
-      font-size: 12px;
+      font-size: 16px;
       text-transform: uppercase;
       letter-spacing: 0.12em;
       color: var(--white);
@@ -120,7 +123,7 @@
       gap: 8px;
       margin-bottom: 8px;
     }
-    .cheat-row-compact .assist-btn { font-size: 11px; padding: 8px 6px; }
+    .cheat-row-compact .assist-btn { font-size: 15px; padding: 8px 6px; }
     .cheat-row {
       display: flex;
       align-items: center;
@@ -134,7 +137,7 @@
       border-color: var(--blue-bright) var(--bevel-dark) var(--bevel-dark) var(--blue-bright);
       padding: 8px 12px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 16px;
       text-transform: uppercase;
       letter-spacing: 0.03em;
       cursor: pointer;
@@ -152,9 +155,9 @@
       border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
       padding: 7px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 16px;
     }
-    .cheat-desc { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; }
+    .cheat-desc { font-size: 15px; color: var(--text-dim); margin: -4px 0 10px; }
     .map-legend { margin-top: 6px; }
     .map-legend summary { cursor: pointer; color: var(--blue-bright); }
     .map-legend ul { margin: 6px 0 0; padding-left: 16px; }
@@ -178,14 +181,14 @@
       border: 2px solid;
       border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
       padding: 10px;
-      font-size: 13px;
+      font-size: 17px;
       line-height: 1.5;
       color: var(--white);
     }
     .hint-box p { margin: 0 0 8px; }
     .code-link {
       display: inline-block;
-      font-size: 11px;
+      font-size: 15px;
       text-transform: uppercase;
       letter-spacing: 0.03em;
       color: var(--white);
@@ -197,7 +200,7 @@
       margin-top: 4px;
     }
     .code-link:hover { background: var(--blue-bright); }
-    .ack-note { font-size: 11px; color: var(--text-dim); margin-top: 16px; }
+    .ack-note { font-size: 15px; color: var(--text-dim); margin-top: 16px; }
     .toast {
       position: fixed;
       bottom: 16px;
@@ -208,7 +211,7 @@
       border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
       color: var(--white);
       padding: 8px 14px;
-      font-size: 13px;
+      font-size: 17px;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s;
@@ -261,7 +264,7 @@
       <div class="map-wrap">
         <canvas id="explored-map" width="320" height="320"></canvas>
       </div>
-      <p class="cheat-desc">Fills in as you explore — walls and doors only appear once you've actually seen them, like a trail. White dot is you.</p>
+      <p class="cheat-desc">Fills in as you explore. White triangle is you. Enemies are red. </p>
 
       <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
       <div class="hint-box" id="hint-box"></div>
