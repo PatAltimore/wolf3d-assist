@@ -159,8 +159,20 @@
     .map-legend summary { cursor: pointer; color: var(--blue-bright); }
     .map-legend ul { margin: 6px 0 0; padding-left: 16px; }
     .map-legend li { margin-bottom: 3px; }
-    .level-picker { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-    .level-picker select { flex: 1; }
+    .map-wrap {
+      background: #000;
+      border: 2px solid;
+      border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+      line-height: 0;
+      margin-bottom: 6px;
+    }
+    #explored-map {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1 / 1;
+      image-rendering: pixelated;
+    }
     .hint-box {
       background: var(--stone-dark);
       border: 2px solid;
@@ -244,6 +256,12 @@
         </details>
         <p class="ack-note">Real Wolf3D debug keys (Tab+letter) wired to buttons.</p>
       </details>
+
+      <h2>Explored Map</h2>
+      <div class="map-wrap">
+        <canvas id="explored-map" width="320" height="320"></canvas>
+      </div>
+      <p class="cheat-desc">Fills in as you explore — walls and doors only appear once you've actually seen them, like a trail. White dot is you.</p>
 
       <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
       <div class="hint-box" id="hint-box"></div>
@@ -369,6 +387,60 @@
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
     setInterval(pollCurrentLevel, 1000);
+
+    // ---- Explored (fog-of-war) map ----
+    // Tile classification matches ASSIST_TILE_* in wl_game.cpp's
+    // assist_get_map(): unseen, floor, wall, door, secret pushwall, enemy.
+    var MAP_COLORS = ["#000000", "#4a3d28", "#7a7a72", "#8a5a2c", "#c9a227", "#b3382c"];
+    var mapCanvas = document.getElementById("explored-map");
+    var mapCtx = mapCanvas.getContext("2d");
+    var cachedMapSize = null;
+
+    function drawExploredMap() {
+      if (typeof Module === "undefined" || !Module.ccall || !Module.HEAPU8) return;
+      try {
+        if (cachedMapSize === null) {
+          cachedMapSize = Module.ccall("assist_get_mapsize", "number", [], []);
+        }
+        var size = cachedMapSize;
+        var ptr = Module.ccall("assist_get_map", "number", [], []);
+        // Re-sliced every draw: ALLOW_MEMORY_GROWTH can detach/replace the
+        // underlying buffer, so a cached typed-array view would go stale.
+        var buf = Module.HEAPU8.subarray(ptr, ptr + size * size);
+        var px = Module.ccall("assist_get_player_x", "number", [], []);
+        var py = Module.ccall("assist_get_player_y", "number", [], []);
+        var pangle = Module.ccall("assist_get_player_angle", "number", [], []);
+
+        var cell = mapCanvas.width / size;
+        mapCtx.fillStyle = MAP_COLORS[0];
+        mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+        for (var y = 0; y < size; y++) {
+          for (var x = 0; x < size; x++) {
+            var v = buf[y * size + x];
+            if (v === 0) continue;
+            mapCtx.fillStyle = MAP_COLORS[v];
+            mapCtx.fillRect(x * cell, y * cell, Math.ceil(cell), Math.ceil(cell));
+          }
+        }
+        if (px >= 0 && py >= 0) {
+          var cx = px * cell + cell / 2, cy = py * cell + cell / 2;
+          var rad = (pangle * Math.PI) / 180;
+          var dx = Math.cos(rad), dy = -Math.sin(rad);
+          mapCtx.strokeStyle = "#ffffff";
+          mapCtx.lineWidth = Math.max(cell * 0.25, 1);
+          mapCtx.beginPath();
+          mapCtx.moveTo(cx, cy);
+          mapCtx.lineTo(cx + dx * cell * 2.5, cy + dy * cell * 2.5);
+          mapCtx.stroke();
+
+          mapCtx.fillStyle = "#ffffff";
+          mapCtx.beginPath();
+          mapCtx.arc(cx, cy, Math.max(cell * 0.6, 2), 0, Math.PI * 2);
+          mapCtx.fill();
+        }
+      } catch (e) { /* engine not ready yet -- try again next tick */ }
+    }
+    setInterval(drawExploredMap, 500);
 
     // ---- Toast ----
     var toastTimer = null;

@@ -38,6 +38,62 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_current_level(void)
 {
     return gamestate.mapon + 1;
 }
+
+// Fog-of-war minimap for the assist-mode sidebar. Unlike the original
+// Tab+O debug overhead view (which always reveals every wall on the
+// floor), this only classifies a tile once the player has actually seen
+// it or a tile next to it -- i.e. an explored trail, not a full map
+// reveal. Values match the ASSIST_TILE_* constants read by shell.html.
+#define ASSIST_TILE_UNSEEN  0
+#define ASSIST_TILE_FLOOR   1
+#define ASSIST_TILE_WALL    2
+#define ASSIST_TILE_DOOR    3
+#define ASSIST_TILE_SECRET  4
+#define ASSIST_TILE_ENEMY   5
+
+static byte assist_map_buf[MAPSIZE * MAPSIZE];
+
+static bool assist_tile_seen(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= MAPSIZE || y >= MAPSIZE)
+        return false;
+    return spotvis[x][y] != 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
+{
+    for (int x = 0; x < MAPSIZE; x++)
+    {
+        for (int y = 0; y < MAPSIZE; y++)
+        {
+            bool seen = assist_tile_seen(x, y) || assist_tile_seen(x - 1, y) ||
+                        assist_tile_seen(x + 1, y) || assist_tile_seen(x, y - 1) ||
+                        assist_tile_seen(x, y + 1);
+            byte v = ASSIST_TILE_UNSEEN;
+            if (seen)
+            {
+                uintptr_t tile = (uintptr_t)actorat[x][y];
+                if (ISPOINTER(tile) && ((objtype *)tile)->flags & FL_SHOOTABLE)
+                    v = ASSIST_TILE_ENEMY;
+                else if (!tile || ISPOINTER(tile))
+                    v = ASSIST_TILE_FLOOR;
+                else if (MAPSPOT(x, y, 1) == PUSHABLETILE)
+                    v = ASSIST_TILE_SECRET;
+                else if (tile < 128)
+                    v = ASSIST_TILE_WALL;
+                else
+                    v = ASSIST_TILE_DOOR;
+            }
+            assist_map_buf[y * MAPSIZE + x] = v;
+        }
+    }
+    return assist_map_buf;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_mapsize(void) { return MAPSIZE; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_x(void) { return player ? player->tilex : -1; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_y(void) { return player ? player->tiley : -1; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_angle(void) { return player ? player->angle : 0; }
 #endif
 
 #ifdef SPEAR
