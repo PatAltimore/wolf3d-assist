@@ -176,6 +176,30 @@
       aspect-ratio: 1 / 1;
       image-rendering: pixelated;
     }
+    .map-key {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+      font-size: 15px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .map-key-item { display: flex; align-items: center; gap: 6px; }
+    .map-key-swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 1px solid var(--bevel-dark);
+      flex-shrink: 0;
+    }
+    .map-key-you {
+      width: 0;
+      height: 0;
+      border: none;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 12px solid var(--white);
+    }
     .hint-box {
       background: var(--stone-dark);
       border: 2px solid;
@@ -264,7 +288,14 @@
       <div class="map-wrap">
         <canvas id="explored-map" width="320" height="320"></canvas>
       </div>
-      <p class="cheat-desc">Fills in as you explore. White triangle is you. Enemies are red. </p>
+      <div class="map-key">
+        <div class="map-key-item"><span class="map-key-swatch map-key-you"></span>You</div>
+        <div class="map-key-item"><span class="map-key-swatch" style="background:#b3382c"></span>Enemy</div>
+        <div class="map-key-item"><span class="map-key-swatch" style="background:#4a3d28"></span>Explored floor</div>
+        <div class="map-key-item"><span class="map-key-swatch" style="background:#7a7a72"></span>Wall</div>
+        <div class="map-key-item"><span class="map-key-swatch" style="background:#8a5a2c"></span>Door</div>
+        <div class="map-key-item"><span class="map-key-swatch" style="background:#c9a227"></span>Secret pushwall</div>
+      </div>
 
       <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
       <div class="hint-box" id="hint-box"></div>
