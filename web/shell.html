@@ -67,6 +67,7 @@
        of relying on CSS auto/intrinsic sizing (which starts at 0 and
        causes the engine to lock onto a tiny resolution). */
     .canvas-wrap {
+      position: relative;
       border: 3px solid var(--bevel-light);
       border-right-color: var(--bevel-dark);
       border-bottom-color: var(--bevel-dark);
@@ -79,6 +80,51 @@
       height: 100% !important;
       image-rendering: pixelated;
     }
+    /* Touch/mobile overlay controls -- only shown on actual touchscreens
+       (real mice/trackpads already have keyboard access), sending the
+       same keys as the physical controls: arrows for move/turn (mirroring
+       what mouse-look drives via controlx), Ctrl to fire, Space to use. */
+    .touch-controls {
+      display: none;
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 12px;
+      justify-content: space-between;
+      align-items: flex-end;
+      pointer-events: none;
+      z-index: 5;
+    }
+    @media (hover: none) and (pointer: coarse) {
+      .touch-controls { display: flex; }
+    }
+    .touch-group { display: flex; gap: 10px; pointer-events: auto; }
+    .touch-group-right { flex-direction: column; align-items: flex-end; }
+    .touch-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(44, 36, 22, 0.75);
+      border: 2px solid var(--bevel-light);
+      color: var(--white);
+      font-family: inherit;
+      font-size: 22px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .touch-btn:active { background: var(--blue); }
+    .touch-btn-fire {
+      width: 68px;
+      height: 68px;
+      font-size: 15px;
+      background: rgba(138, 44, 31, 0.8);
+      border-color: #b0483a;
+    }
+    .touch-btn-use { font-size: 13px; }
     .assist-panel {
       flex: 0 0 340px;
       max-width: 100%;
@@ -260,6 +306,17 @@
       <progress id="progress" hidden max="100" value="0"></progress>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
+        <div class="touch-controls">
+          <div class="touch-group">
+            <button class="touch-btn" id="tc-left" aria-label="Turn left">◄</button>
+            <button class="touch-btn" id="tc-forward" aria-label="Move forward">▲</button>
+            <button class="touch-btn" id="tc-right" aria-label="Turn right">►</button>
+          </div>
+          <div class="touch-group touch-group-right">
+            <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
+            <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -524,7 +581,11 @@
       I: ["KeyI", "i", 73],
       W: ["KeyW", "w", 87],
       O: ["KeyO", "o", 79],
-      Pause: ["Pause", "Pause", 19]
+      Pause: ["Pause", "Pause", 19],
+      UpArrow: ["ArrowUp", "ArrowUp", 38],
+      LeftArrow: ["ArrowLeft", "ArrowLeft", 37],
+      RightArrow: ["ArrowRight", "ArrowRight", 39],
+      Control: ["ControlLeft", "Control", 17]
     };
     for (var d = 0; d <= 9; d++) {
       KEYS["Digit" + d] = ["Digit" + d, String(d), 48 + d];
@@ -627,6 +688,36 @@
     document.getElementById("hint-box").addEventListener("click", function (e) {
       if (e.target.closest(".code-link") && !knownPaused) sendPause();
     });
+
+    // ---- Touch/mobile controls ----
+    // Real hold buttons (as long as your finger is down, the key is down),
+    // not a tap -- movement/turning/firing all need continuous key state
+    // to work like the physical controls they're standing in for.
+    function bindHoldButton(el, keyName) {
+      var active = false;
+      var k = KEYS[keyName];
+      function press(e) {
+        e.preventDefault();
+        if (active) return;
+        active = true;
+        document.getElementById("canvas").focus();
+        dispatchKey("keydown", k[0], k[1], k[2]);
+      }
+      function release(e) {
+        if (!active) return;
+        active = false;
+        dispatchKey("keyup", k[0], k[1], k[2]);
+      }
+      el.addEventListener("pointerdown", press);
+      el.addEventListener("pointerup", release);
+      el.addEventListener("pointercancel", release);
+      el.addEventListener("pointerleave", release);
+    }
+    bindHoldButton(document.getElementById("tc-forward"), "UpArrow");
+    bindHoldButton(document.getElementById("tc-left"), "LeftArrow");
+    bindHoldButton(document.getElementById("tc-right"), "RightArrow");
+    bindHoldButton(document.getElementById("tc-fire"), "Control");
+    bindHoldButton(document.getElementById("tc-use"), "Space");
 
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
