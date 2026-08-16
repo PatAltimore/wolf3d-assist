@@ -101,6 +101,15 @@
       border-bottom: 2px solid var(--bevel-dark);
     }
     .assist-panel h2:first-child { margin-top: 0; }
+    .pause-btn {
+      display: block;
+      width: 100%;
+      margin-bottom: 12px;
+      background: var(--gray);
+      border-color: #a3a396 var(--bevel-dark) var(--bevel-dark) #a3a396;
+    }
+    .pause-btn:hover { background: #8f8f84; }
+    .pause-btn.is-paused { background: #8a2c1f; border-color: #b0483a var(--bevel-dark) var(--bevel-dark) #b0483a; }
     .cheats-details { margin: 0 0 8px; }
     .cheats-details summary {
       font-size: 16px;
@@ -255,6 +264,8 @@
     </div>
 
     <div class="assist-panel">
+      <button class="assist-btn pause-btn" id="pause-btn">Pause</button>
+
       <details class="cheats-details">
         <summary>Cheats</summary>
         <div class="cheat-row-compact">
@@ -512,7 +523,8 @@
       N: ["KeyN", "n", 78],
       I: ["KeyI", "i", 73],
       W: ["KeyW", "w", 87],
-      O: ["KeyO", "o", 79]
+      O: ["KeyO", "o", 79],
+      Pause: ["Pause", "Pause", 19]
     };
     for (var d = 0; d <= 9; d++) {
       KEYS["Digit" + d] = ["Digit" + d, String(d), 48 + d];
@@ -579,6 +591,41 @@
       var lvl = warpSelect.value;
       runDebugCheat("W", { digits: lvl.split("") });
       toast("Warping to floor " + lvl);
+    });
+
+    // ---- Pause / resume ----
+    // Sends the engine's real Pause key (SDLK_PAUSE, see assist_is_paused
+    // in wl_game.cpp) rather than reimplementing pausing -- the engine
+    // already shows a "Paused" screen and blocks until any key dismisses
+    // it, so "resume" is just sending some other key.
+    var pauseBtn = document.getElementById("pause-btn");
+    var knownPaused = false;
+
+    async function sendPause() { document.getElementById("canvas").focus(); await tap("Pause"); }
+    async function sendResume() { document.getElementById("canvas").focus(); await tap("Space"); }
+
+    pauseBtn.addEventListener("click", function () {
+      if (knownPaused) { sendResume(); toast("Resumed"); }
+      else { sendPause(); toast("Paused"); }
+    });
+
+    function pollPaused() {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var p = Module.ccall("assist_is_paused", "number", [], []) === 1;
+        if (p !== knownPaused) {
+          knownPaused = p;
+          pauseBtn.textContent = p ? "Resume" : "Pause";
+          pauseBtn.classList.toggle("is-paused", p);
+        }
+      } catch (e) { /* engine not ready yet */ }
+    }
+    setInterval(pollPaused, 500);
+
+    // Auto-pause whenever a "See the code" link is opened, so the game
+    // isn't running unattended while you're reading source in the new tab.
+    document.getElementById("hint-box").addEventListener("click", function (e) {
+      if (e.target.closest(".code-link") && !knownPaused) sendPause();
     });
 
     // ---- Emscripten module wiring ----

@@ -116,6 +116,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_mapsize(void) { return MAPSIZE; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_x(void) { return player ? player->tilex : -1; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_y(void) { return player ? player->tiley : -1; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_angle(void) { return player ? player->angle : 0; }
+
+// The engine's own pause: setting Paused (id_in.h/.cpp) makes the next
+// PlayLoop tic show the "Paused" pic and block in IN_Ack() until any key
+// is pressed, then it clears itself automatically. The Pause button
+// (web/shell.html) drives this by sending the real SDLK_PAUSE key rather
+// than duplicating the logic; this getter just lets the UI reflect the
+// current state.
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_is_paused(void) { return Paused ? 1 : 0; }
 #endif
 
 #ifdef SPEAR
