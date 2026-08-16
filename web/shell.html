@@ -99,6 +99,30 @@
     }
     .touch-group { display: flex; gap: 10px; pointer-events: auto; }
     .touch-group-right { flex-direction: column; align-items: flex-end; }
+    .touch-joystick {
+      position: relative;
+      width: 112px;
+      height: 112px;
+      border-radius: 50%;
+      background: rgba(44, 36, 22, 0.6);
+      border: 2px solid var(--bevel-light);
+      touch-action: none;
+      pointer-events: auto;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .touch-joystick-knob {
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: rgba(240, 234, 216, 0.85);
+      border: 2px solid var(--bevel-dark);
+      pointer-events: none;
+    }
     .touch-btn {
       width: 56px;
       height: 56px;
@@ -307,10 +331,8 @@
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
         <div class="touch-controls">
-          <div class="touch-group">
-            <button class="touch-btn" id="tc-left" aria-label="Turn left">◄</button>
-            <button class="touch-btn" id="tc-forward" aria-label="Move forward">▲</button>
-            <button class="touch-btn" id="tc-right" aria-label="Turn right">►</button>
+          <div class="touch-joystick" id="tc-joystick" aria-label="Move / turn">
+            <div class="touch-joystick-knob" id="tc-joystick-knob"></div>
           </div>
           <div class="touch-group touch-group-right">
             <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
@@ -583,6 +605,7 @@
       O: ["KeyO", "o", 79],
       Pause: ["Pause", "Pause", 19],
       UpArrow: ["ArrowUp", "ArrowUp", 38],
+      DownArrow: ["ArrowDown", "ArrowDown", 40],
       LeftArrow: ["ArrowLeft", "ArrowLeft", 37],
       RightArrow: ["ArrowRight", "ArrowRight", 39],
       Control: ["ControlLeft", "Control", 17]
@@ -713,11 +736,72 @@
       el.addEventListener("pointercancel", release);
       el.addEventListener("pointerleave", release);
     }
-    bindHoldButton(document.getElementById("tc-forward"), "UpArrow");
-    bindHoldButton(document.getElementById("tc-left"), "LeftArrow");
-    bindHoldButton(document.getElementById("tc-right"), "RightArrow");
     bindHoldButton(document.getElementById("tc-fire"), "Control");
     bindHoldButton(document.getElementById("tc-use"), "Space");
+
+    // Virtual analog joystick for move/turn. The engine only has discrete
+    // key states (no true analog speed), so this maps the knob's position
+    // to up to two simultaneous directions -- vertical drag drives
+    // forward/back (UpArrow/DownArrow), horizontal drives turning
+    // (LeftArrow/RightArrow, mirroring what mouse-look drives via
+    // controlx) -- so dragging diagonally moves and turns at once, same
+    // as holding two arrow keys together.
+    (function setupJoystick() {
+      var base = document.getElementById("tc-joystick");
+      var knob = document.getElementById("tc-joystick-knob");
+      var maxDist = 40;
+      var deadzone = 12;
+      var pointerId = null;
+      var active = { up: false, down: false, left: false, right: false };
+      var dirKey = { up: "UpArrow", down: "DownArrow", left: "LeftArrow", right: "RightArrow" };
+
+      function setDir(dir, on) {
+        if (active[dir] === on) return;
+        active[dir] = on;
+        var k = KEYS[dirKey[dir]];
+        dispatchKey(on ? "keydown" : "keyup", k[0], k[1], k[2]);
+      }
+
+      function update(clientX, clientY) {
+        var rect = base.getBoundingClientRect();
+        var dx = clientX - (rect.left + rect.width / 2);
+        var dy = clientY - (rect.top + rect.height / 2);
+        var dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDist);
+        var angle = Math.atan2(dy, dx);
+        var kx = Math.cos(angle) * dist, ky = Math.sin(angle) * dist;
+        knob.style.transform = "translate(calc(-50% + " + kx + "px), calc(-50% + " + ky + "px))";
+        setDir("up", dy < -deadzone);
+        setDir("down", dy > deadzone);
+        setDir("left", dx < -deadzone);
+        setDir("right", dx > deadzone);
+      }
+
+      function reset() {
+        knob.style.transform = "translate(-50%, -50%)";
+        setDir("up", false);
+        setDir("down", false);
+        setDir("left", false);
+        setDir("right", false);
+      }
+
+      base.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        pointerId = e.pointerId;
+        document.getElementById("canvas").focus();
+        update(e.clientX, e.clientY);
+      });
+      window.addEventListener("pointermove", function (e) {
+        if (e.pointerId !== pointerId) return;
+        update(e.clientX, e.clientY);
+      });
+      function endDrag(e) {
+        if (e.pointerId !== pointerId) return;
+        pointerId = null;
+        reset();
+      }
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("pointercancel", endDrag);
+    })();
 
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
