@@ -722,6 +722,7 @@
         e.preventDefault();
         if (active) return;
         active = true;
+        try { el.setPointerCapture(e.pointerId); } catch (err) {}
         document.getElementById("canvas").focus();
         dispatchKey("keydown", k[0], k[1], k[2]);
       }
@@ -781,6 +782,13 @@
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
+        // Without this, dragging past the joystick's own edges hands the
+        // gesture to whatever element is physically under the finger next,
+        // which lacks touch-action:none -- the browser then tries its
+        // native overscroll/bounce gesture there, which is the "error
+        // sound" this fixes. Capturing keeps the whole drag on this
+        // element regardless of where the finger wanders.
+        try { base.setPointerCapture(e.pointerId); } catch (err) {}
         document.getElementById("canvas").focus();
         update(e.clientX, e.clientY);
       });
