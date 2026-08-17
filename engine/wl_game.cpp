@@ -124,6 +124,27 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_angle(void) { return playe
 // than duplicating the logic; this getter just lets the UI reflect the
 // current state.
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_is_paused(void) { return Paused ? 1 : 0; }
+
+// Analog touch joystick input, applied into controlx/controly the same
+// way PollMouseMove() applies real mouse deltas (see PollControls in
+// wl_play.cpp) -- proportional to deflection, unlike the keyboard's
+// digital on/off arrow keys, so a light push moves slowly instead of
+// snapping straight to full speed.
+static int assist_joy_dx = 0, assist_joy_dy = 0; // -100..100, from web/shell.html
+
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_joystick(int dx, int dy)
+{
+    assist_joy_dx = dx;
+    assist_joy_dy = dy;
+}
+
+void assist_apply_joystick(void)
+{
+    if (assist_joy_dx)
+        controlx += (assist_joy_dx * (int)(BASEMOVE * tics)) / 100;
+    if (assist_joy_dy)
+        controly += (assist_joy_dy * (int)(BASEMOVE * tics)) / 100;
+}
 #endif
 
 #ifdef SPEAR

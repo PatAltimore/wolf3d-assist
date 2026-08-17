@@ -388,6 +388,10 @@ void PollJoystickMove (void)
 ===================
 */
 
+#ifdef __EMSCRIPTEN__
+void assist_apply_joystick(void); // wl_game.cpp
+#endif
+
 void PollControls (void)
 {
     int max, min, i;
@@ -466,6 +470,10 @@ void PollControls (void)
 
     if (joystickenabled)
         PollJoystickMove ();
+
+#ifdef __EMSCRIPTEN__
+    assist_apply_joystick ();
+#endif
 
 //
 // bound movement to a maximum

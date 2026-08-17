@@ -97,12 +97,11 @@
     @media (hover: none) and (pointer: coarse) {
       .touch-controls { display: flex; }
     }
-    .touch-group { display: flex; gap: 10px; pointer-events: auto; }
-    .touch-group-right { flex-direction: column; align-items: flex-end; }
+    .touch-group { display: flex; gap: 14px; align-items: center; pointer-events: auto; }
     .touch-joystick {
       position: relative;
-      width: 112px;
-      height: 112px;
+      width: 160px;
+      height: 160px;
       border-radius: 50%;
       background: rgba(44, 36, 22, 0.6);
       border: 2px solid var(--bevel-light);
@@ -113,8 +112,8 @@
     }
     .touch-joystick-knob {
       position: absolute;
-      width: 48px;
-      height: 48px;
+      width: 68px;
+      height: 68px;
       left: 50%;
       top: 50%;
       transform: translate(-50%, -50%);
@@ -124,14 +123,14 @@
       pointer-events: none;
     }
     .touch-btn {
-      width: 56px;
-      height: 56px;
+      width: 72px;
+      height: 72px;
       border-radius: 50%;
       background: rgba(44, 36, 22, 0.75);
       border: 2px solid var(--bevel-light);
       color: var(--white);
       font-family: inherit;
-      font-size: 22px;
+      font-size: 24px;
       line-height: 1;
       display: flex;
       align-items: center;
@@ -142,9 +141,9 @@
     }
     .touch-btn:active { background: var(--blue); }
     .touch-btn-fire {
-      width: 68px;
-      height: 68px;
-      font-size: 15px;
+      width: 86px;
+      height: 86px;
+      font-size: 17px;
       background: rgba(138, 44, 31, 0.8);
       border-color: #b0483a;
     }
@@ -335,8 +334,8 @@
             <div class="touch-joystick-knob" id="tc-joystick-knob"></div>
           </div>
           <div class="touch-group touch-group-right">
-            <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
             <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+            <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
           </div>
         </div>
       </div>
@@ -739,49 +738,44 @@
     bindHoldButton(document.getElementById("tc-fire"), "Control");
     bindHoldButton(document.getElementById("tc-use"), "Space");
 
-    // Virtual analog joystick for move/turn. The engine only has discrete
-    // key states (no true analog speed), so this maps the knob's position
-    // to up to two simultaneous directions -- vertical drag drives
-    // forward/back (UpArrow/DownArrow), horizontal drives turning
-    // (LeftArrow/RightArrow, mirroring what mouse-look drives via
-    // controlx) -- so dragging diagonally moves and turns at once, same
-    // as holding two arrow keys together.
+    // Virtual analog joystick for move/turn. Rather than simulating arrow
+    // keys (all-or-nothing -- the engine treats a held key as full speed
+    // the instant you cross a threshold), this feeds a proportional
+    // -100..100 value straight into assist_set_joystick (wl_game.cpp),
+    // which adds it into controlx/controly every frame exactly like
+    // PollMouseMove() does for a real mouse -- so a light push moves
+    // slowly and a full push moves at full speed, like an actual stick.
     (function setupJoystick() {
       var base = document.getElementById("tc-joystick");
       var knob = document.getElementById("tc-joystick-knob");
-      var maxDist = 40;
-      var deadzone = 12;
+      var maxDist = 55;
+      var deadzone = 8;
       var pointerId = null;
-      var active = { up: false, down: false, left: false, right: false };
-      var dirKey = { up: "UpArrow", down: "DownArrow", left: "LeftArrow", right: "RightArrow" };
 
-      function setDir(dir, on) {
-        if (active[dir] === on) return;
-        active[dir] = on;
-        var k = KEYS[dirKey[dir]];
-        dispatchKey(on ? "keydown" : "keyup", k[0], k[1], k[2]);
+      function setJoystick(dx, dy) {
+        if (typeof Module === "undefined" || !Module.ccall) return;
+        try { Module.ccall("assist_set_joystick", null, ["number", "number"], [dx, dy]); }
+        catch (e) { /* engine not ready yet */ }
       }
 
       function update(clientX, clientY) {
         var rect = base.getBoundingClientRect();
         var dx = clientX - (rect.left + rect.width / 2);
         var dy = clientY - (rect.top + rect.height / 2);
-        var dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDist);
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var clamped = Math.min(dist, maxDist);
         var angle = Math.atan2(dy, dx);
-        var kx = Math.cos(angle) * dist, ky = Math.sin(angle) * dist;
+        var kx = Math.cos(angle) * clamped, ky = Math.sin(angle) * clamped;
         knob.style.transform = "translate(calc(-50% + " + kx + "px), calc(-50% + " + ky + "px))";
-        setDir("up", dy < -deadzone);
-        setDir("down", dy > deadzone);
-        setDir("left", dx < -deadzone);
-        setDir("right", dx > deadzone);
+
+        if (dist < deadzone) { setJoystick(0, 0); return; }
+        var pct = clamped / maxDist; // 0..1, proportional to push distance
+        setJoystick(Math.round((kx / clamped) * pct * 100), Math.round((ky / clamped) * pct * 100));
       }
 
       function reset() {
         knob.style.transform = "translate(-50%, -50%)";
-        setDir("up", false);
-        setDir("down", false);
-        setDir("left", false);
-        setDir("right", false);
+        setJoystick(0, 0);
       }
 
       base.addEventListener("pointerdown", function (e) {
