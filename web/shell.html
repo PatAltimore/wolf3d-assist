@@ -26,7 +26,10 @@
       --white: #f0ead8;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    /* Stops the browser's native pull-to-refresh/rubber-band gesture from
+       triggering when scrolling reaches the top -- easy to hit by
+       accident on mobile now that portrait mode makes the page scroll. */
+    html, body { height: 100%; overscroll-behavior-y: contain; }
     body {
       margin: 0;
       background: var(--bg);
@@ -97,7 +100,6 @@
       gap: 10px;
       padding-top: 10px;
     }
-    .pause-btn { width: 200px; max-width: 60%; }
     .touch-controls {
       display: none;
       width: 100%;
@@ -215,15 +217,6 @@
       border-top: 1px solid var(--blue-bright);
       border-bottom: 2px solid var(--bevel-dark);
     }
-    .pause-btn {
-      display: block;
-      width: 100%;
-      margin-bottom: 12px;
-      background: var(--gray);
-      border-color: #a3a396 var(--bevel-dark) var(--bevel-dark) #a3a396;
-    }
-    .pause-btn:hover { background: #8f8f84; }
-    .pause-btn.is-paused { background: #8a2c1f; border-color: #b0483a var(--bevel-dark) var(--bevel-dark) #b0483a; }
     .cheats-details { margin: 0 0 8px; }
     .cheats-details summary {
       font-size: 16px;
@@ -403,7 +396,6 @@
       </div>
 
       <div class="game-controls" id="game-controls">
-        <button class="assist-btn pause-btn" id="pause-btn">Pause</button>
         <div class="touch-controls">
           <div class="touch-joystick" id="tc-joystick" aria-label="Move / turn">
             <div class="touch-joystick-knob" id="tc-joystick-knob"></div>
@@ -769,26 +761,27 @@
     // in wl_game.cpp) rather than reimplementing pausing -- the engine
     // already shows a "Paused" screen and blocks until any key dismisses
     // it, so "resume" is just sending some other key.
-    var pauseBtn = document.getElementById("pause-btn");
     var knownPaused = false;
 
     async function sendPause() { document.getElementById("canvas").focus(); await tap("Pause"); }
     async function sendResume() { document.getElementById("canvas").focus(); await tap("Space"); }
 
-    pauseBtn.addEventListener("click", function () {
+    // No dedicated button -- tapping the game screen itself toggles
+    // pause. Scoped to touch input only: on desktop, a left click on the
+    // canvas already fires the weapon (buttonmouse[0] == bt_attack in
+    // wl_play.cpp), so treating clicks as pause there would make mouse
+    // play unusable. Touch has no such conflict since tapping the canvas
+    // isn't bound to any action in the touch control scheme.
+    document.getElementById("canvas").addEventListener("pointerup", function (e) {
+      if (e.pointerType !== "touch") return;
       if (knownPaused) { sendResume(); toast("Resumed"); }
-      else { sendPause(); toast("Paused"); }
+      else { sendPause(); toast("Paused — tap the screen to resume"); }
     });
 
     function pollPaused() {
       if (typeof Module === "undefined" || !Module.ccall) return;
       try {
-        var p = Module.ccall("assist_is_paused", "number", [], []) === 1;
-        if (p !== knownPaused) {
-          knownPaused = p;
-          pauseBtn.textContent = p ? "Resume" : "Pause";
-          pauseBtn.classList.toggle("is-paused", p);
-        }
+        knownPaused = Module.ccall("assist_is_paused", "number", [], []) === 1;
       } catch (e) { /* engine not ready yet */ }
     }
     setInterval(pollPaused, 500);
