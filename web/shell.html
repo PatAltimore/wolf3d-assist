@@ -2,6 +2,7 @@
 <html lang="en-us">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Wolfenstein 3D — Assist Mode</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -80,31 +81,48 @@
       height: 100% !important;
       image-rendering: pixelated;
     }
-    /* Touch/mobile overlay controls -- only shown on actual touchscreens
-       (real mice/trackpads already have keyboard access), sending the
-       same keys as the physical controls: arrows for move/turn (mirroring
-       what mouse-look drives via controlx), Ctrl to fire, Space to use. */
+    /* Game controls strip: below the canvas (not overlaid on top of it --
+       an overlay partially obscures the 3D view, a strip underneath
+       doesn't). Pause always shows; the joystick/fire/use row only shows
+       on actual touchscreens (real mice/trackpads already have keyboard
+       access), sending the same inputs as the physical controls: the
+       joystick drives controlx/controly directly like mouse-look does,
+       Ctrl fires, Space uses. */
+    .game-controls {
+      width: 100%;
+      max-width: 1100px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding-top: 10px;
+    }
+    .pause-btn { width: 200px; max-width: 60%; }
     .touch-controls {
       display: none;
-      position: absolute;
-      left: 0; right: 0; bottom: 0;
-      padding: 12px;
+      width: 100%;
       justify-content: space-between;
-      align-items: flex-end;
-      pointer-events: none;
-      z-index: 5;
+      align-items: center;
+      padding: 4px 16px 10px;
     }
     @media (hover: none) and (pointer: coarse) {
       .touch-controls { display: flex; }
     }
-    .touch-group { display: flex; gap: 14px; align-items: center; pointer-events: auto; }
+    .touch-group { display: flex; gap: 14px; align-items: center; }
+    /* Stylized to read as physical hardware -- radial-gradient shading for
+       a molded-plastic look, an offset solid shadow ("0 Npx 0 <color>")
+       for a raised 3D button that visibly depresses on :active. */
     .touch-joystick {
       position: relative;
       width: 160px;
       height: 160px;
       border-radius: 50%;
-      background: rgba(44, 36, 22, 0.6);
-      border: 2px solid var(--bevel-light);
+      background: radial-gradient(circle at 50% 42%, var(--stone) 0%, var(--stone-dark) 75%);
+      border: 3px solid var(--bevel-dark);
+      box-shadow:
+        inset 0 6px 14px rgba(0, 0, 0, 0.65),
+        inset 0 -3px 6px rgba(133, 113, 74, 0.25),
+        0 3px 6px rgba(0, 0, 0, 0.5);
       touch-action: none;
       pointer-events: auto;
       user-select: none;
@@ -112,25 +130,27 @@
     }
     .touch-joystick-knob {
       position: absolute;
-      width: 68px;
-      height: 68px;
+      width: 72px;
+      height: 72px;
       left: 50%;
       top: 50%;
       transform: translate(-50%, -50%);
       border-radius: 50%;
-      background: rgba(240, 234, 216, 0.85);
+      background: radial-gradient(circle at 35% 28%, #fdfaf0, var(--white) 45%, #beb290 100%);
       border: 2px solid var(--bevel-dark);
+      box-shadow: 0 5px 8px rgba(0, 0, 0, 0.55), inset 0 -3px 5px rgba(0, 0, 0, 0.18);
       pointer-events: none;
     }
     .touch-btn {
       width: 72px;
       height: 72px;
       border-radius: 50%;
-      background: rgba(44, 36, 22, 0.75);
-      border: 2px solid var(--bevel-light);
+      background: radial-gradient(circle at 35% 28%, var(--blue-bright), var(--blue) 60%, #1c3348 100%);
+      border: 3px solid var(--bevel-dark);
       color: var(--white);
       font-family: inherit;
-      font-size: 24px;
+      font-size: 22px;
+      font-weight: bold;
       line-height: 1;
       display: flex;
       align-items: center;
@@ -138,20 +158,46 @@
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+      box-shadow:
+        0 5px 0 var(--bevel-dark),
+        0 7px 9px rgba(0, 0, 0, 0.5),
+        inset 0 2px 3px rgba(255, 255, 255, 0.3);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      transition: transform 0.05s ease-out, box-shadow 0.05s ease-out;
     }
-    .touch-btn:active { background: var(--blue); }
+    .touch-btn:active {
+      transform: translateY(4px);
+      box-shadow:
+        0 1px 0 var(--bevel-dark),
+        0 2px 4px rgba(0, 0, 0, 0.4),
+        inset 0 2px 3px rgba(255, 255, 255, 0.15);
+    }
     .touch-btn-fire {
       width: 86px;
       height: 86px;
-      font-size: 17px;
-      background: rgba(138, 44, 31, 0.8);
-      border-color: #b0483a;
+      font-size: 16px;
+      background: radial-gradient(circle at 35% 28%, #e07257, #8a2c1f 60%, #45140c 100%);
+      box-shadow:
+        0 5px 0 #45140c,
+        0 7px 9px rgba(0, 0, 0, 0.5),
+        inset 0 2px 3px rgba(255, 255, 255, 0.3);
     }
-    .touch-btn-use { font-size: 13px; }
+    .touch-btn-fire:active {
+      box-shadow:
+        0 1px 0 #45140c,
+        0 2px 4px rgba(0, 0, 0, 0.4),
+        inset 0 2px 3px rgba(255, 255, 255, 0.15);
+    }
+    .touch-btn-use {
+      font-size: 13px;
+      background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
+    }
     .assist-panel {
       flex: 0 0 340px;
       max-width: 100%;
       height: 100vh;
+      display: flex;
+      flex-direction: column;
       background: var(--panel);
       border-left: 3px solid var(--bevel-dark);
       box-shadow: inset 2px 0 0 var(--bevel-light);
@@ -169,7 +215,6 @@
       border-top: 1px solid var(--blue-bright);
       border-bottom: 2px solid var(--bevel-dark);
     }
-    .assist-panel h2:first-child { margin-top: 0; }
     .pause-btn {
       display: block;
       width: 100%;
@@ -319,6 +364,32 @@
       transition: opacity 0.2s;
     }
     .toast.show { opacity: 1; }
+
+    /* Mobile portrait: stack everything in one scrolling column instead
+       of the game+sidebar side-by-side layout -- game at top, its
+       controls directly below it, then the map/cheats/hints panel
+       (reordered: map first, per how this was asked for). */
+    @media (orientation: portrait) and (max-width: 768px) {
+      html, body { height: auto; }
+      body { overflow-y: auto; overflow-x: hidden; }
+      .layout { flex-direction: column; }
+      .game-area {
+        flex: none;
+        width: 100%;
+      }
+      .assist-panel {
+        flex: none;
+        width: 100%;
+        height: auto;
+        overflow-y: visible;
+        border-left: none;
+        border-top: 3px solid var(--bevel-dark);
+        box-shadow: inset 0 2px 0 var(--bevel-light);
+      }
+      .map-section { order: 1; }
+      .cheats-details { order: 2; }
+      .hints-section { order: 3; }
+    }
   </style>
 </head>
 <body>
@@ -329,6 +400,10 @@
       <progress id="progress" hidden max="100" value="0"></progress>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
+      </div>
+
+      <div class="game-controls" id="game-controls">
+        <button class="assist-btn pause-btn" id="pause-btn">Pause</button>
         <div class="touch-controls">
           <div class="touch-joystick" id="tc-joystick" aria-label="Move / turn">
             <div class="touch-joystick-knob" id="tc-joystick-knob"></div>
@@ -342,8 +417,6 @@
     </div>
 
     <div class="assist-panel">
-      <button class="assist-btn pause-btn" id="pause-btn">Pause</button>
-
       <details class="cheats-details">
         <summary>Cheats</summary>
         <div class="cheat-row-compact">
@@ -373,21 +446,25 @@
         <p class="ack-note">Real Wolf3D debug keys (Tab+letter) wired to buttons.</p>
       </details>
 
-      <h2>Explored Map</h2>
-      <div class="map-wrap">
-        <canvas id="explored-map" width="320" height="320"></canvas>
-      </div>
-      <div class="map-key">
-        <div class="map-key-item"><span class="map-key-swatch map-key-you"></span>You</div>
-        <div class="map-key-item"><span class="map-key-swatch" style="background:#b3382c"></span>Enemy</div>
-        <div class="map-key-item"><span class="map-key-swatch" style="background:#4a3d28"></span>Explored floor</div>
-        <div class="map-key-item"><span class="map-key-swatch" style="background:#7a7a72"></span>Wall</div>
-        <div class="map-key-item"><span class="map-key-swatch" style="background:#8a5a2c"></span>Door</div>
-        <div class="map-key-item"><span class="map-key-swatch" style="background:#c9a227"></span>Secret pushwall</div>
-      </div>
+      <section class="map-section">
+        <h2>Explored Map</h2>
+        <div class="map-wrap">
+          <canvas id="explored-map" width="320" height="320"></canvas>
+        </div>
+        <div class="map-key">
+          <div class="map-key-item"><span class="map-key-swatch map-key-you"></span>You</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#b3382c"></span>Enemy</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#4a3d28"></span>Explored floor</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#7a7a72"></span>Wall</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#8a5a2c"></span>Door</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#c9a227"></span>Secret pushwall</div>
+        </div>
+      </section>
 
-      <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
-      <div class="hint-box" id="hint-box"></div>
+      <section class="hints-section">
+        <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
+        <div class="hint-box" id="hint-box"></div>
+      </section>
     </div>
   </div>
 
@@ -400,10 +477,21 @@
     function sizeCanvasWrap() {
       var wrap = document.getElementById("canvas-wrap");
       var gameArea = document.querySelector(".game-area");
-      var chrome = document.querySelector(".game-area h1").offsetHeight +
-                   document.getElementById("status").offsetHeight + 24;
+      var isPortraitMobile = window.matchMedia("(orientation: portrait) and (max-width: 768px)").matches;
       var availW = gameArea.clientWidth - 16;
-      var availH = window.innerHeight - chrome - 16;
+      var availH;
+      if (isPortraitMobile) {
+        // The page scrolls in this mode (controls/map/cheats/hints all
+        // stack below) -- cap well under full height so it's visually
+        // obvious there's more below instead of trying to fit everything
+        // above the fold.
+        availH = Math.round(window.innerHeight * 0.5);
+      } else {
+        var chrome = document.querySelector(".game-area h1").offsetHeight +
+                     document.getElementById("status").offsetHeight +
+                     document.getElementById("game-controls").offsetHeight + 24;
+        availH = window.innerHeight - chrome - 16;
+      }
       var w = Math.max(availW, 320);
       var h = w / GAME_RATIO;
       if (h > availH && availH > 0) {
