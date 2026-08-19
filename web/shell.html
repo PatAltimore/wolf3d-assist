@@ -84,6 +84,23 @@
       height: 100% !important;
       image-rendering: pixelated;
     }
+    .resume-banner {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: 90%;
+      background: var(--panel);
+      border: 2px solid;
+      border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
+      padding: 14px 18px;
+      text-align: center;
+      z-index: 10;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
+    }
+    .resume-banner p { margin: 0 0 10px; color: var(--white); font-size: 17px; }
+    .resume-banner-actions { display: flex; gap: 10px; justify-content: center; }
+    .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
     /* Game controls strip: below the canvas (not overlaid on top of it --
        an overlay partially obscures the 3D view, a strip underneath
        doesn't). Pause always shows; the joystick/fire/use row only shows
@@ -393,6 +410,13 @@
       <progress id="progress" hidden max="100" value="0"></progress>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
+        <div class="resume-banner" id="resume-banner" hidden>
+          <p>Saved game found — probably from an accidental refresh.</p>
+          <div class="resume-banner-actions">
+            <button class="assist-btn" id="resume-yes">Resume</button>
+            <button class="assist-btn" id="resume-no">Dismiss</button>
+          </div>
+        </div>
       </div>
 
       <div class="game-controls" id="game-controls">
@@ -575,6 +599,54 @@
     }
     renderHint(1);
 
+    // ---- Autosave (protects against accidental refresh/tab-close) ----
+    // assist_autosave (wl_game.cpp) is a no-op that returns 0 unless a
+    // game is actually in progress, so it's safe to call speculatively.
+    function autosaveAndFlush() {
+      if (typeof Module === "undefined" || !Module.ccall || !Module.FS) return;
+      try {
+        var saved = Module.ccall("assist_autosave", "number", [], []);
+        if (saved) {
+          Module.FS.syncfs(false, function (err) {
+            if (err) console.error("Autosave: IndexedDB write failed", err);
+          });
+        }
+      } catch (e) { /* engine not ready yet */ }
+    }
+
+    // ---- Resume-from-autosave banner ----
+    // Offered once, right after boot, if a saved game exists. "Resume"
+    // doesn't call LoadTheGame directly -- it drives the engine's own
+    // Title -> Main Menu -> Load Game -> slot 9 flow via the same keys a
+    // player would press (KEYS.DownArrow/Enter, defined below), reusing
+    // its battle-tested state transitions (skips re-initializing the map,
+    // resumes music position, etc.) instead of reimplementing them.
+    var resumeBanner = document.getElementById("resume-banner");
+    var resumeCheckInterval = setInterval(function () {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var has = Module.ccall("assist_has_autosave", "number", [], []);
+        clearInterval(resumeCheckInterval);
+        if (has) resumeBanner.hidden = false;
+      } catch (e) { /* engine not ready yet -- try again next tick */ }
+    }, 500);
+
+    document.getElementById("resume-no").addEventListener("click", function () {
+      resumeBanner.hidden = true;
+    });
+    document.getElementById("resume-yes").addEventListener("click", async function () {
+      resumeBanner.hidden = true;
+      document.getElementById("canvas").focus();
+      await tap("Enter"); // dismiss title/credits/highscores, opens Main Menu
+      await sleep(500);
+      for (var i = 0; i < 3; i++) { await tap("DownArrow"); await sleep(120); } // -> Load Game
+      await tap("Enter");
+      await sleep(400); // Load/Save screen opening
+      for (var i = 0; i < 9; i++) { await tap("DownArrow"); await sleep(120); } // -> slot 9
+      await tap("Enter");
+      toast("Resuming...");
+    });
+
     // Always follows the engine's actual current floor (see
     // assist_get_current_level in wl_game.cpp) -- polled since there's no
     // push notification from the C side.
@@ -584,8 +656,10 @@
       try {
         var lvl = Module.ccall("assist_get_current_level", "number", [], []);
         if (lvl >= 1 && lvl <= 10 && lvl !== lastSyncedLevel) {
+          var isFirstCheck = lastSyncedLevel === null;
           lastSyncedLevel = lvl;
           renderHint(lvl);
+          if (!isFirstCheck) autosaveAndFlush(); // don't fire on the initial title-screen read
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
@@ -923,7 +997,20 @@
       monitorRunDependencies: function (left) {
         this.totalDependencies = Math.max(this.totalDependencies, left);
         setStatus(left ? "Preparing... (" + (this.totalDependencies - left) + "/" + this.totalDependencies + ")" : "All downloads complete.");
-      }
+      },
+      // Save games (see ASSIST_SAVE_PATH in wl_game.cpp) go to /save, a
+      // separate IndexedDB-backed mount from the read-only preloaded
+      // shareware data at /, so autosaves survive a page reload.
+      arguments: ["--configdir", "/save"],
+      preRun: [function () {
+        FS.mkdir("/save");
+        FS.mount(FS.filesystems.IDBFS, {}, "/save");
+        Module.addRunDependency("assist-idbfs-init");
+        FS.syncfs(true, function (err) {
+          if (err) console.error("Autosave: IndexedDB read failed", err);
+          Module.removeRunDependency("assist-idbfs-init");
+        });
+      }]
     };
     setStatus("Downloading...");
     window.onerror = function () {
