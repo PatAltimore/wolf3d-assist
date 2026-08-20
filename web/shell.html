@@ -251,6 +251,52 @@
     .cheats-details summary::-webkit-details-marker { display: none; }
     .cheats-details summary::before { content: "▸ "; }
     .cheats-details[open] summary::before { content: "▾ "; }
+
+    .actions-details { margin: 0 0 8px; }
+    .actions-details summary {
+      font-size: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--white);
+      background: var(--blue);
+      margin: 0 -14px 10px;
+      padding: 6px 14px;
+      border-top: 1px solid var(--blue-bright);
+      border-bottom: 2px solid var(--bevel-dark);
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .actions-details summary::-webkit-details-marker { display: none; }
+    .actions-details summary::before { content: "▸ "; }
+    .actions-details[open] summary::before { content: "▾ "; }
+    .actions-badge {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #e0483a;
+      animation: actions-badge-pulse 1.4s ease-out infinite;
+    }
+    @keyframes actions-badge-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(224, 72, 58, 0.6); }
+      70% { box-shadow: 0 0 0 7px rgba(224, 72, 58, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(224, 72, 58, 0); }
+    }
+    .action-log-list { list-style: none; margin: 0; padding: 0; }
+    .action-log-list li {
+      background: var(--stone-dark);
+      border: 2px solid;
+      border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark);
+      padding: 8px 10px;
+      margin-bottom: 8px;
+    }
+    .action-log-time { display: block; color: var(--text-dim); font-size: 15px; }
+    .action-log-label { display: block; color: var(--white); font-size: 17px; margin: 2px 0 6px; }
+    .action-log-links { display: flex; flex-wrap: wrap; gap: 6px; }
+    .action-log-links .code-link { margin-top: 0; }
+    .action-log-empty { color: var(--text-dim); font-size: 15px; margin: 0; }
     .cheat-row-compact {
       display: flex;
       gap: 8px;
@@ -398,7 +444,8 @@
       }
       .map-section { order: 1; }
       .cheats-details { order: 2; }
-      .hints-section { order: 3; }
+      .actions-details { order: 3; }
+      .hints-section { order: 4; }
     }
   </style>
 </head>
@@ -477,6 +524,12 @@
         </div>
       </section>
 
+      <details class="actions-details" id="actions-details">
+        <summary>Recent Actions<span class="actions-badge" id="actions-badge" hidden></span></summary>
+        <ul class="action-log-list" id="action-log-list"></ul>
+        <p class="action-log-empty" id="action-log-empty">Nothing logged yet — play a bit.</p>
+      </details>
+
       <section class="hints-section">
         <h2>Level Hints — Floor <span id="current-floor">1</span></h2>
         <div class="hint-box" id="hint-box"></div>
@@ -522,6 +575,36 @@
 
     // ---- Assist mode data ----
     var CODE_MUSEUM_BASE = "https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d/";
+
+    // ---- Recent Actions log ----
+    // A small de-duplicated log of "things the player just did," each
+    // tagged with the Code Museum file(s) that explain it. Keyed by
+    // `category` (one Map slot per category) rather than an append-only
+    // list: repeating the same category updates that one entry's
+    // timestamp/label in place instead of adding a new line -- otherwise
+    // e.g. every kill would add its own row and bury everything else
+    // within seconds. Deliberately only logs a handful of discrete,
+    // already-known-cheaply events (floor changes, cheat use, kill/secret/
+    // weapon counts increasing) rather than continuous state like health
+    // per hit or movement, which would flood the log even with
+    // de-duplication (a real, distinct value each time, not a repeat).
+    var ACTION_LOG_WINDOW_MS = 5 * 60 * 1000;
+    var actionLogEntries = new Map(); // category -> {category, timestamp, label, links}
+    var actionLogHasUnseen = false;
+
+    function logAction(category, label, links) {
+      actionLogEntries.set(category, { category: category, timestamp: Date.now(), label: label, links: links || [] });
+      var cutoff = Date.now() - ACTION_LOG_WINDOW_MS;
+      actionLogEntries.forEach(function (entry, key) {
+        if (entry.timestamp < cutoff) actionLogEntries.delete(key);
+      });
+      actionLogHasUnseen = true;
+      renderActionLog();
+    }
+
+    function getRecentActions() {
+      return Array.from(actionLogEntries.values()).sort(function (a, b) { return b.timestamp - a.timestamp; });
+    }
 
     var HINTS = [
       { level: 1, tips: [
@@ -579,6 +662,91 @@
     function codeMuseumLink(slug) {
       return CODE_MUSEUM_BASE + slug;
     }
+
+    // ---- Recent Actions rendering ----
+    // In-place DOM reconciliation (update existing rows, only add/remove
+    // what actually changed) rather than a full rebuild on every render --
+    // a naive rebuild was confirmed, in the projects this feature is
+    // ported from, to break mid-click link interaction. Mirrors this
+    // file's own renderHint/drawExploredMap pattern of tolerating a
+    // not-yet-ready engine, even though this function itself doesn't call
+    // into it.
+    var actionsDetails = document.getElementById("actions-details");
+    var actionsBadge = document.getElementById("actions-badge");
+    var actionLogListEl = document.getElementById("action-log-list");
+    var actionLogEmptyEl = document.getElementById("action-log-empty");
+    var actionLogRows = new Map(); // category -> {li, time, label, links}
+
+    function formatRelativeTime(timestamp) {
+      var seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+      if (seconds < 5) return "just now";
+      if (seconds < 60) return seconds + "s ago";
+      return Math.round(seconds / 60) + "m ago";
+    }
+
+    function buildActionRow() {
+      var li = document.createElement("li");
+      var time = document.createElement("span"); time.className = "action-log-time";
+      var label = document.createElement("span"); label.className = "action-log-label";
+      var links = document.createElement("span"); links.className = "action-log-links";
+      li.appendChild(time); li.appendChild(label); li.appendChild(links);
+      return { li: li, time: time, label: label, links: links };
+    }
+
+    function renderActionLog() {
+      var actions = getRecentActions(); // newest-updated first
+      actionLogEmptyEl.hidden = actions.length > 0;
+
+      var seen = {};
+      actions.forEach(function (entry) {
+        seen[entry.category] = true;
+        var row = actionLogRows.get(entry.category);
+        if (!row) {
+          row = buildActionRow();
+          actionLogRows.set(entry.category, row);
+        }
+        row.time.textContent = formatRelativeTime(entry.timestamp);
+        row.label.textContent = entry.label;
+        row.links.innerHTML = "";
+        entry.links.forEach(function (link) {
+          var a = document.createElement("a");
+          a.className = "code-link";
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.href = codeMuseumLink(link.slug);
+          a.textContent = link.label + " →";
+          row.links.appendChild(a);
+        });
+        actionLogListEl.appendChild(row.li); // re-attaching an attached node just moves it
+      });
+
+      actionLogRows.forEach(function (row, category) {
+        if (!seen[category]) {
+          row.li.remove();
+          actionLogRows.delete(category);
+        }
+      });
+
+      actionsBadge.hidden = !(actionLogHasUnseen && !actionsDetails.open);
+    }
+    setInterval(renderActionLog, 30000); // keep "2m ago" labels fresh without a new entry
+
+    // Clears the "new entry" badge once you actually open the section --
+    // matches the projects this is ported from, which likewise only clear
+    // an unseen indicator once the relevant panel becomes the visible one.
+    actionsDetails.addEventListener("toggle", function () {
+      if (actionsDetails.open) {
+        actionLogHasUnseen = false;
+        actionsBadge.hidden = true;
+      }
+    });
+
+    // Same auto-pause-on-code-link-click behavior as the Hints panel (see
+    // below) -- consistent regardless of which section a link was opened
+    // from.
+    actionLogListEl.addEventListener("click", function (e) {
+      if (e.target.closest(".code-link") && !knownPaused) sendPause();
+    });
 
     // ---- Warp target picker (Cheats section only) ----
     var warpSelect = document.getElementById("warp-level");
@@ -659,11 +827,53 @@
           var isFirstCheck = lastSyncedLevel === null;
           lastSyncedLevel = lvl;
           renderHint(lvl);
-          if (!isFirstCheck) autosaveAndFlush(); // don't fire on the initial title-screen read
+          if (!isFirstCheck) {
+            autosaveAndFlush(); // don't fire on the initial title-screen read
+            var floorHints = HINTS.find(function (x) { return x.level === lvl; });
+            var floorLinks = floorHints ? floorHints.tips.slice(0, 2).map(function (t) { return { slug: t.slug, label: t.label }; }) : [];
+            logAction("floor", "Reached Floor " + lvl, floorLinks);
+          }
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
     setInterval(pollCurrentLevel, 1000);
+
+    // Kills/secrets/weapon pickups: gamestate fields the engine already
+    // maintains (see assist_get_kills/secrets/best_weapon in wl_game.cpp),
+    // diffed here the same way pollCurrentLevel diffs the floor number.
+    var WEAPON_NAMES = ["Knife", "Pistol", "Machine Gun", "Chaingun"];
+    var lastKills = null, lastSecrets = null, lastWeapon = null;
+    function pollProgressStats() {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var kills = Module.ccall("assist_get_kills", "number", [], []);
+        var secrets = Module.ccall("assist_get_secrets", "number", [], []);
+        var weapon = Module.ccall("assist_get_best_weapon", "number", [], []);
+
+        if (lastKills !== null && kills > lastKills) {
+          logAction("kills", "Defeated " + kills + " enem" + (kills === 1 ? "y" : "ies") + " so far", [
+            { slug: "wl-act1-c", label: "Guard patrol & sighting logic" },
+            { slug: "wl-act2-c", label: "Attack & boss behavior" }
+          ]);
+        }
+        lastKills = kills;
+
+        if (lastSecrets !== null && secrets > lastSecrets) {
+          logAction("secrets", "Found " + secrets + " secret" + (secrets === 1 ? "" : "s") + " so far", [
+            { slug: "wl-play-c", label: "Pushwall / secret handling" }
+          ]);
+        }
+        lastSecrets = secrets;
+
+        if (lastWeapon !== null && weapon > lastWeapon && weapon >= 0 && weapon < WEAPON_NAMES.length) {
+          logAction("weapon", "Picked up the " + WEAPON_NAMES[weapon], [
+            { slug: "wl-agent-c", label: "Weapon & ammo handling" }
+          ]);
+        }
+        lastWeapon = weapon;
+      } catch (e) { /* engine not ready yet -- try again next tick */ }
+    }
+    setInterval(pollProgressStats, 1000);
 
     // ---- Explored (fog-of-war) map ----
     // Tile classification matches ASSIST_TILE_* in wl_game.cpp's
@@ -808,26 +1018,32 @@
     // boxes (and the overhead map) stay up until your next real keypress,
     // exactly like the original 1992 debug keys -- forcing an early
     // dismiss made the overhead map flash and vanish instantly.
+    var DEBUG_KEYS_LINK = [{ slug: "wl-debug-c", label: "Debug & cheat keys" }];
     document.getElementById("cheat-god").addEventListener("click", function () {
       runDebugCheat("G");
       toast("God mode toggled");
+      logAction("cheat:god", "Toggled God Mode", DEBUG_KEYS_LINK);
     });
     document.getElementById("cheat-noclip").addEventListener("click", function () {
       runDebugCheat("N");
       toast("No clip toggled");
+      logAction("cheat:noclip", "Toggled No Clip", DEBUG_KEYS_LINK);
     });
     document.getElementById("cheat-items").addEventListener("click", function () {
       runDebugCheat("I");
       toast("Gave weapons, ammo & health");
+      logAction("cheat:items", "Used Give All", DEBUG_KEYS_LINK);
     });
     document.getElementById("cheat-map").addEventListener("click", function () {
       runDebugCheat("O");
       toast("Showing overhead map — press any key in-game to close it");
+      logAction("cheat:map", "Used the Overhead Map cheat", DEBUG_KEYS_LINK);
     });
     document.getElementById("cheat-warp").addEventListener("click", function () {
       var lvl = warpSelect.value;
       runDebugCheat("W", { digits: lvl.split("") });
       toast("Warping to floor " + lvl);
+      logAction("cheat:warp", "Warped to Floor " + lvl, DEBUG_KEYS_LINK);
     });
 
     // ---- Pause / resume ----

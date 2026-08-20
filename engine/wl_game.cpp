@@ -125,6 +125,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_player_angle(void) { return playe
 // the current state.
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_is_paused(void) { return Paused ? 1 : 0; }
 
+// Feeds the "Recent Actions" log (web/shell.html): plain reads of
+// gamestate fields already maintained by the game itself, polled from JS
+// and diffed there to detect increases -- no new bookkeeping needed here.
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_kills(void) { return gamestate.killcount; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_secrets(void) { return gamestate.secretcount; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_best_weapon(void) { return (int)gamestate.bestweapon; }
+
 // Autosave: reuses the engine's own SaveTheGame/LoadTheGame (wl_main.cpp)
 // -- the same routines the interactive Save/Load Game menu writes through
 // -- into a dedicated slot (9, the last of the 10 save slots) reserved for
