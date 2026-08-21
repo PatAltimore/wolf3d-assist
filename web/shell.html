@@ -855,7 +855,7 @@
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
-    setInterval(pollCurrentLevel, 1000);
+    setInterval(pollCurrentLevel, 1500); // doesn't need to be near-instant -- see perf note below
 
     // Kills/secrets/weapon pickups: gamestate fields the engine already
     // maintains (see assist_get_kills/secrets/best_weapon in wl_game.cpp),
@@ -892,7 +892,7 @@
         lastWeapon = weapon;
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
-    setInterval(pollProgressStats, 1000);
+    setInterval(pollProgressStats, 2000);
 
     // ---- Explored (fog-of-war) map ----
     // Tile classification matches ASSIST_TILE_* in wl_game.cpp's
@@ -950,7 +950,14 @@
         }
       } catch (e) { /* engine not ready yet -- try again next tick */ }
     }
-    setInterval(drawExploredMap, 500);
+    // 500ms was confirmed live to make the game feel less smooth: each
+    // tick both re-walks all 4096 map tiles on the C side
+    // (assist_get_map, wl_game.cpp -- see its own perf note) and redraws
+    // the canvas with up to that many fillRect calls on this side. A
+    // fog-of-war trail doesn't need sub-second freshness, so this and the
+    // other assist-mode polls below were all slowed down rather than
+    // trying to make each tick individually cheaper.
+    setInterval(drawExploredMap, 1500);
 
     // ---- Toast ----
     var toastTimer = null;
@@ -1093,7 +1100,7 @@
         knownPaused = Module.ccall("assist_is_paused", "number", [], []) === 1;
       } catch (e) { /* engine not ready yet */ }
     }
-    setInterval(pollPaused, 500);
+    setInterval(pollPaused, 800);
 
     // Auto-pause whenever a "See the code" link is opened, so the game
     // isn't running unattended while you're reading source in the new tab.

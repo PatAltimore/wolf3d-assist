@@ -67,8 +67,22 @@ void assist_reset_explored(void)
     memset(assist_ever_seen, 0, sizeof(assist_ever_seen));
 }
 
+// Runs from ThreeDRefresh, i.e. the game's core render loop -- once per
+// rendered frame would mean a 4096-tile scan added to every single frame
+// regardless of display refresh rate (confirmed live to make the game
+// feel less smooth, especially on high-refresh displays where "every
+// frame" is much more often than the 30-70fps this engine originally
+// targeted). The explored trail doesn't need that: skipping most frames
+// still updates it several times a second, well under what's needed for
+// something the player checks after the fact, not in real time.
+#define ASSIST_ACCUMULATE_EVERY_N_FRAMES 8
+static int assist_accumulate_frame_counter = 0;
+
 void assist_accumulate_seen(void)
 {
+    if (++assist_accumulate_frame_counter < ASSIST_ACCUMULATE_EVERY_N_FRAMES)
+        return;
+    assist_accumulate_frame_counter = 0;
     for (int x = 0; x < MAPSIZE; x++)
         for (int y = 0; y < MAPSIZE; y++)
             if (spotvis[x][y])
@@ -82,6 +96,9 @@ static bool assist_tile_seen(int x, int y)
     return assist_ever_seen[x][y] != 0 || spotvis[x][y] != 0;
 }
 
+// Walks all 4096 tiles (with a 4-neighbor check each, so ~20K reads) --
+// cheap in isolation but not free, so web/shell.html only polls this a
+// few times a second rather than every frame; see its own perf note.
 extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
 {
     for (int x = 0; x < MAPSIZE; x++)
