@@ -97,6 +97,13 @@
       text-align: center;
       z-index: 10;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
+      /* .canvas-wrap (this banner's positioning parent) sets line-height:0
+         to collapse the canvas's own inline-block baseline gap -- without
+         this override, the banner's text would inherit that 0 and every
+         wrapped line would stack on the same baseline instead of below
+         the previous one, reading as overlapping text on narrow screens
+         where "Saved game found..." wraps to more than one line. */
+      line-height: normal;
     }
     .resume-banner p { margin: 0 0 10px; color: var(--white); font-size: 17px; }
     .resume-banner-actions { display: flex; gap: 10px; justify-content: center; }
