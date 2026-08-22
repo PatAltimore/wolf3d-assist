@@ -103,11 +103,11 @@
     .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
     /* Game controls strip: below the canvas (not overlaid on top of it --
        an overlay partially obscures the 3D view, a strip underneath
-       doesn't). Pause always shows; the twin-stick/fire/use row only
-       shows on actual touchscreens (real mice/trackpads already have
-       keyboard access): the left stick moves + strafes, the right stick
-       turns (see assist_set_move/assist_set_turn in wl_game.cpp), Ctrl
-       fires, Space uses. */
+       doesn't). Pause always shows; the twin-stick/use row only shows on
+       actual touchscreens (real mice/trackpads already have keyboard
+       access): the left stick moves + strafes, the right stick turns and
+       doubles as Fire on a tap (see assist_set_move/assist_set_turn in
+       wl_game.cpp and setupTurnStickTap below), Space uses. */
     .game-controls {
       width: 100%;
       max-width: 1100px;
@@ -128,12 +128,6 @@
       .touch-controls { display: flex; }
     }
     .touch-group { display: flex; gap: 10px; align-items: center; }
-    /* USE + FIRE stacked instead of side by side -- with the turn stick
-       added alongside them, a single row (USE + FIRE + stick) is wider
-       than a phone screen at typical widths and gets flex-shrunk into
-       uselessly thin controls. Stacking keeps the row's total width down
-       to one button-width plus the stick. */
-    .touch-btn-col { display: flex; flex-direction: column; gap: 8px; }
     /* Stylized to read as physical hardware -- radial-gradient shading for
        a molded-plastic look, an offset solid shadow ("0 Npx 0 <color>")
        for a raised 3D button that visibly depresses on :active. */
@@ -167,17 +161,18 @@
       pointer-events: none;
     }
     /* Right (turn) stick: smaller than the move stick since it shares a
-       row with USE/FIRE rather than anchoring the whole control bar, and
-       its knob is tinted blue like the button accents elsewhere in this
-       theme so it reads as a distinct control from the move stick. */
+       row with USE rather than anchoring the whole control bar, and its
+       knob is tinted the same orange/red as the old dedicated FIRE
+       button -- as a visual reminder that touching it fires (see
+       setupTurnStickTap below: a tap fires, a drag turns). */
     .touch-joystick-turn {
-      width: 96px;
-      height: 96px;
+      width: 110px;
+      height: 110px;
     }
     .touch-joystick-knob-turn {
-      width: 44px;
-      height: 44px;
-      background: radial-gradient(circle at 35% 28%, var(--blue-bright), var(--blue) 60%, #1c3348 100%);
+      width: 50px;
+      height: 50px;
+      background: radial-gradient(circle at 35% 28%, #e07257, #8a2c1f 60%, #45140c 100%);
     }
     /* Sits below the stick rather than on it -- the knob already fills
        most of the circle, so text on top of it would mostly be covered
@@ -225,22 +220,6 @@
       transform: translateY(4px);
       box-shadow:
         0 1px 0 var(--bevel-dark),
-        0 2px 4px rgba(0, 0, 0, 0.4),
-        inset 0 2px 3px rgba(255, 255, 255, 0.15);
-    }
-    .touch-btn-fire {
-      width: 86px;
-      height: 86px;
-      font-size: 16px;
-      background: radial-gradient(circle at 35% 28%, #e07257, #8a2c1f 60%, #45140c 100%);
-      box-shadow:
-        0 5px 0 #45140c,
-        0 7px 9px rgba(0, 0, 0, 0.5),
-        inset 0 2px 3px rgba(255, 255, 255, 0.3);
-    }
-    .touch-btn-fire:active {
-      box-shadow:
-        0 1px 0 #45140c,
         0 2px 4px rgba(0, 0, 0, 0.4),
         inset 0 2px 3px rgba(255, 255, 255, 0.15);
     }
@@ -502,20 +481,19 @@
       <div class="game-controls" id="game-controls">
         <div class="touch-controls">
           <!-- Twin-stick: left stick moves (forward/back + strafe left/
-               right), right stick turns -- Ctrl/Space still fire/use via
-               the dedicated buttons below, independent of either stick. -->
+               right), right stick turns and doubles as Fire -- touching
+               it without dragging fires (see setupTurnStickTap below),
+               dragging it turns. Space still uses via the dedicated
+               button below, independent of either stick. -->
           <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
             <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
             <span class="touch-joystick-label">Move</span>
           </div>
           <div class="touch-group touch-group-right">
-            <div class="touch-btn-col">
-              <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
-              <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
-            </div>
-            <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn">
+            <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+            <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
               <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
-              <span class="touch-joystick-label">Turn</span>
+              <span class="touch-joystick-label">Turn / Fire</span>
             </div>
           </div>
         </div>
@@ -1156,9 +1134,10 @@
     });
 
     // ---- Touch/mobile controls ----
-    // Real hold buttons (as long as your finger is down, the key is down),
-    // not a tap -- movement/turning/firing all need continuous key state
-    // to work like the physical controls they're standing in for.
+    // A real hold button (as long as your finger is down, the key is
+    // down), not a tap -- Use needs continuous key state to work like the
+    // physical control it's standing in for. Fire is tap-only, on the
+    // turn stick below (setupTurnStickTap), not a hold button.
     function bindHoldButton(el, keyName) {
       var active = false;
       var k = KEYS[keyName];
@@ -1180,7 +1159,6 @@
       el.addEventListener("pointercancel", release);
       el.addEventListener("pointerleave", release);
     }
-    bindHoldButton(document.getElementById("tc-fire"), "Control");
     bindHoldButton(document.getElementById("tc-use"), "Space");
 
     // Shared drag-tracking behind both touch sticks below: pointer capture,
@@ -1254,13 +1232,50 @@
       catch (e) { /* engine not ready yet */ }
     });
 
-    // Right stick: turn only, feeding assist_set_turn (wl_game.cpp), which
+    // Right stick: turn, and doubles as Fire -- but only for an actual
+    // tap, not a hold-to-turn. Firing for the entire duration a hold is
+    // down (matching the old dedicated FIRE button's hold-to-fire
+    // behavior) would burn ammo just from turning, since turning *is*
+    // holding the stick down. Feeds assist_set_turn (wl_game.cpp), which
     // adds it into controlx every frame like mouse-look does.
     setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 38, 6, function (dx) {
       if (typeof Module === "undefined" || !Module.ccall) return;
       try { Module.ccall("assist_set_turn", null, ["number"], [dx]); }
       catch (e) { /* engine not ready yet */ }
     });
+
+    // Tap-to-fire, tracked independently of setupStick's own drag/deflection
+    // handling above -- reusing that deflection value (distance from the
+    // *stick's center*) to tell a tap from a drag is wrong: unless your
+    // finger lands on the exact center pixel, it's already several pixels
+    // from center on the very first frame, before any real movement, so
+    // most taps would be wrongly read as drags and never fire -- worse the
+    // closer to the edge you tapped, which reads as location-dependent.
+    // This instead tracks distance from wherever *this touch itself*
+    // started, completely independent of the stick's center or visuals,
+    // so a tap fires reliably no matter where on the stick it lands.
+    (function setupTurnStickTap() {
+      var el = document.getElementById("tc-turn-joystick");
+      var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
+      var pointerId = null, startX = 0, startY = 0, dragged = false;
+
+      el.addEventListener("pointerdown", function (e) {
+        pointerId = e.pointerId;
+        startX = e.clientX;
+        startY = e.clientY;
+        dragged = false;
+      });
+      window.addEventListener("pointermove", function (e) {
+        if (e.pointerId !== pointerId) return;
+        var dx = e.clientX - startX, dy = e.clientY - startY;
+        if (Math.sqrt(dx * dx + dy * dy) > TAP_MOVE_THRESHOLD) dragged = true;
+      });
+      window.addEventListener("pointerup", function (e) {
+        if (e.pointerId !== pointerId) return;
+        pointerId = null;
+        if (!dragged) tap("Control");
+      });
+    })();
 
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
