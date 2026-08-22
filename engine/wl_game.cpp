@@ -206,26 +206,44 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_autosave(void)
     return 1;
 }
 
-// Analog touch joystick input, applied into controlx/controly the same
-// way PollMouseMove() applies real mouse deltas (see PollControls in
-// wl_play.cpp) -- proportional to deflection, unlike the keyboard's
-// digital on/off arrow keys, so a light push moves slowly instead of
-// snapping straight to full speed.
-static int assist_joy_dx = 0, assist_joy_dy = 0; // -100..100, from web/shell.html
+// Twin-stick touch input. Left stick drives forward/back (into controly,
+// same as before) plus strafe; right stick turns (into controlx). These
+// have to be two separately-addressable sticks rather than one: Wolf3D's
+// own controlx is dual-purpose (turn when buttonstate[bt_strafe] is up,
+// strafe when it's held -- see ControlMovement in wl_agent.cpp), which
+// works for a single keyboard/mouse axis but not for a twin-stick pad
+// where turn and strafe both need to be live at once. So the left stick's
+// X axis bypasses controlx entirely and thrusts sideways directly (see
+// assist_get_strafe_dx, consumed by ControlMovement) instead of reusing
+// it. Applied proportional to deflection, unlike the keyboard's digital
+// on/off arrow keys, so a light push moves slowly instead of snapping
+// straight to full speed -- the same way PollMouseMove() applies real
+// mouse deltas (see PollControls in wl_play.cpp).
+static int assist_move_dx = 0, assist_move_dy = 0; // -100..100, left stick: strafe, forward
+static int assist_turn_dx = 0;                     // -100..100, right stick: turn
 
-extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_joystick(int dx, int dy)
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_move(int dx, int dy)
 {
-    assist_joy_dx = dx;
-    assist_joy_dy = dy;
+    assist_move_dx = dx;
+    assist_move_dy = dy;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_turn(int dx)
+{
+    assist_turn_dx = dx;
 }
 
 void assist_apply_joystick(void)
 {
-    if (assist_joy_dx)
-        controlx += (assist_joy_dx * (int)(BASEMOVE * tics)) / 100;
-    if (assist_joy_dy)
-        controly += (assist_joy_dy * (int)(BASEMOVE * tics)) / 100;
+    if (assist_turn_dx)
+        controlx += (assist_turn_dx * (int)(BASEMOVE * tics)) / 100;
+    if (assist_move_dy)
+        controly += (assist_move_dy * (int)(BASEMOVE * tics)) / 100;
 }
+
+// Read by ControlMovement (wl_agent.cpp) to thrust sideways directly --
+// see the big comment above for why strafe can't just reuse controlx.
+int assist_get_strafe_dx(void) { return assist_move_dx; }
 #endif
 
 #ifdef SPEAR

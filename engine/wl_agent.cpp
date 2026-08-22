@@ -2,6 +2,10 @@
 
 #include "wl_def.h"
 
+#ifdef __EMSCRIPTEN__
+int assist_get_strafe_dx(void); // wl_game.cpp: twin-stick left/right axis, -100..100
+#endif
+
 /*
 =============================================================================
 
@@ -176,6 +180,37 @@ void ControlMovement (objtype *ob)
         else
             Thrust(angle, BASEMOVE * MOVESCALE * tics);
     }
+
+#ifdef __EMSCRIPTEN__
+    // Twin-stick left/right axis strafes directly and proportionally,
+    // independent of buttonstate[bt_strafe] -- see the comment on
+    // assist_move_dx in wl_game.cpp for why (controlx's turn/strafe
+    // dual-purpose meaning only works for a single keyboard/mouse axis,
+    // not two independently-addressable sticks). Same BASEMOVE/RUNMOVE
+    // scale as the dedicated strafe keys just above, so a full push
+    // matches their speed; scaled by push distance in between.
+    {
+        int assistStrafeDx = assist_get_strafe_dx();
+        if (assistStrafeDx)
+        {
+            long spd = (buttonstate[bt_run] ^ always_run) ? RUNMOVE : BASEMOVE;
+            if (assistStrafeDx > 0)
+            {
+                angle = ob->angle - ANGLES/4;
+                if (angle < 0)
+                    angle += ANGLES;
+            }
+            else
+            {
+                angle = ob->angle + ANGLES/4;
+                if (angle >= ANGLES)
+                    angle -= ANGLES;
+            }
+            int mag = assistStrafeDx > 0 ? assistStrafeDx : -assistStrafeDx;
+            Thrust(angle, mag * spd * MOVESCALE * tics / 100);
+        }
+    }
+#endif
 
     //
     // side to side move

@@ -103,11 +103,11 @@
     .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
     /* Game controls strip: below the canvas (not overlaid on top of it --
        an overlay partially obscures the 3D view, a strip underneath
-       doesn't). Pause always shows; the joystick/fire/use row only shows
-       on actual touchscreens (real mice/trackpads already have keyboard
-       access), sending the same inputs as the physical controls: the
-       joystick drives controlx/controly directly like mouse-look does,
-       Ctrl fires, Space uses. */
+       doesn't). Pause always shows; the twin-stick/fire/use row only
+       shows on actual touchscreens (real mice/trackpads already have
+       keyboard access): the left stick moves + strafes, the right stick
+       turns (see assist_set_move/assist_set_turn in wl_game.cpp), Ctrl
+       fires, Space uses. */
     .game-controls {
       width: 100%;
       max-width: 1100px;
@@ -127,7 +127,13 @@
     @media (hover: none) and (pointer: coarse) {
       .touch-controls { display: flex; }
     }
-    .touch-group { display: flex; gap: 14px; align-items: center; }
+    .touch-group { display: flex; gap: 10px; align-items: center; }
+    /* USE + FIRE stacked instead of side by side -- with the turn stick
+       added alongside them, a single row (USE + FIRE + stick) is wider
+       than a phone screen at typical widths and gets flex-shrunk into
+       uselessly thin controls. Stacking keeps the row's total width down
+       to one button-width plus the stick. */
+    .touch-btn-col { display: flex; flex-direction: column; gap: 8px; }
     /* Stylized to read as physical hardware -- radial-gradient shading for
        a molded-plastic look, an offset solid shadow ("0 Npx 0 <color>")
        for a raised 3D button that visibly depresses on :active. */
@@ -158,6 +164,37 @@
       background: radial-gradient(circle at 35% 28%, #fdfaf0, var(--white) 45%, #beb290 100%);
       border: 2px solid var(--bevel-dark);
       box-shadow: 0 5px 8px rgba(0, 0, 0, 0.55), inset 0 -3px 5px rgba(0, 0, 0, 0.18);
+      pointer-events: none;
+    }
+    /* Right (turn) stick: smaller than the move stick since it shares a
+       row with USE/FIRE rather than anchoring the whole control bar, and
+       its knob is tinted blue like the button accents elsewhere in this
+       theme so it reads as a distinct control from the move stick. */
+    .touch-joystick-turn {
+      width: 96px;
+      height: 96px;
+    }
+    .touch-joystick-knob-turn {
+      width: 44px;
+      height: 44px;
+      background: radial-gradient(circle at 35% 28%, var(--blue-bright), var(--blue) 60%, #1c3348 100%);
+    }
+    /* Sits below the stick rather than on it -- the knob already fills
+       most of the circle, so text on top of it would mostly be covered
+       except at full deflection. Absolutely positioned relative to
+       .touch-joystick (position: relative), so it doesn't affect the
+       row's flex height. */
+    .touch-joystick-label {
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 6px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      white-space: nowrap;
       pointer-events: none;
     }
     .touch-btn {
@@ -464,12 +501,22 @@
 
       <div class="game-controls" id="game-controls">
         <div class="touch-controls">
-          <div class="touch-joystick" id="tc-joystick" aria-label="Move / turn">
-            <div class="touch-joystick-knob" id="tc-joystick-knob"></div>
+          <!-- Twin-stick: left stick moves (forward/back + strafe left/
+               right), right stick turns -- Ctrl/Space still fire/use via
+               the dedicated buttons below, independent of either stick. -->
+          <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
+            <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
+            <span class="touch-joystick-label">Move</span>
           </div>
           <div class="touch-group touch-group-right">
-            <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
-            <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
+            <div class="touch-btn-col">
+              <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+              <button class="touch-btn touch-btn-fire" id="tc-fire" aria-label="Fire">FIRE</button>
+            </div>
+            <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn">
+              <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
+              <span class="touch-joystick-label">Turn</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1136,25 +1183,19 @@
     bindHoldButton(document.getElementById("tc-fire"), "Control");
     bindHoldButton(document.getElementById("tc-use"), "Space");
 
-    // Virtual analog joystick for move/turn. Rather than simulating arrow
-    // keys (all-or-nothing -- the engine treats a held key as full speed
-    // the instant you cross a threshold), this feeds a proportional
-    // -100..100 value straight into assist_set_joystick (wl_game.cpp),
-    // which adds it into controlx/controly every frame exactly like
-    // PollMouseMove() does for a real mouse -- so a light push moves
-    // slowly and a full push moves at full speed, like an actual stick.
-    (function setupJoystick() {
-      var base = document.getElementById("tc-joystick");
-      var knob = document.getElementById("tc-joystick-knob");
-      var maxDist = 55;
-      var deadzone = 8;
+    // Shared drag-tracking behind both touch sticks below: pointer capture,
+    // deadzone/clamp math, and knob positioning are identical between them
+    // -- they only differ in how far the knob can travel and what happens
+    // with the resulting -100..100 deflection. Rather than simulating
+    // arrow keys (all-or-nothing -- the engine treats a held key as full
+    // speed the instant you cross a threshold), `onMove(dx, dy)` feeds a
+    // proportional value straight to the engine every frame, so a light
+    // push moves/turns slowly and a full push moves at full speed, like
+    // an actual stick.
+    function setupStick(baseId, knobId, maxDist, deadzone, onMove) {
+      var base = document.getElementById(baseId);
+      var knob = document.getElementById(knobId);
       var pointerId = null;
-
-      function setJoystick(dx, dy) {
-        if (typeof Module === "undefined" || !Module.ccall) return;
-        try { Module.ccall("assist_set_joystick", null, ["number", "number"], [dx, dy]); }
-        catch (e) { /* engine not ready yet */ }
-      }
 
       function update(clientX, clientY) {
         var rect = base.getBoundingClientRect();
@@ -1166,20 +1207,20 @@
         var kx = Math.cos(angle) * clamped, ky = Math.sin(angle) * clamped;
         knob.style.transform = "translate(calc(-50% + " + kx + "px), calc(-50% + " + ky + "px))";
 
-        if (dist < deadzone) { setJoystick(0, 0); return; }
+        if (dist < deadzone) { onMove(0, 0); return; }
         var pct = clamped / maxDist; // 0..1, proportional to push distance
-        setJoystick(Math.round((kx / clamped) * pct * 100), Math.round((ky / clamped) * pct * 100));
+        onMove(Math.round((kx / clamped) * pct * 100), Math.round((ky / clamped) * pct * 100));
       }
 
       function reset() {
         knob.style.transform = "translate(-50%, -50%)";
-        setJoystick(0, 0);
+        onMove(0, 0);
       }
 
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
-        // Without this, dragging past the joystick's own edges hands the
+        // Without this, dragging past the stick's own edges hands the
         // gesture to whatever element is physically under the finger next,
         // which lacks touch-action:none -- the browser then tries its
         // native overscroll/bounce gesture there, which is the "error
@@ -1200,7 +1241,26 @@
       }
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("pointercancel", endDrag);
-    })();
+    }
+
+    // Left stick: move + strafe, feeding assist_set_move (wl_game.cpp),
+    // which adds the forward axis into controly every frame exactly like
+    // PollMouseMove() does for a real mouse, and thrusts the strafe axis
+    // directly (see the comment on assist_move_dx in wl_game.cpp for why
+    // strafe can't just reuse controlx like the keyboard's Alt-strafe does).
+    setupStick("tc-move-joystick", "tc-move-joystick-knob", 55, 8, function (dx, dy) {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try { Module.ccall("assist_set_move", null, ["number", "number"], [dx, dy]); }
+      catch (e) { /* engine not ready yet */ }
+    });
+
+    // Right stick: turn only, feeding assist_set_turn (wl_game.cpp), which
+    // adds it into controlx every frame like mouse-look does.
+    setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 38, 6, function (dx) {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try { Module.ccall("assist_set_turn", null, ["number"], [dx]); }
+      catch (e) { /* engine not ready yet */ }
+    });
 
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
