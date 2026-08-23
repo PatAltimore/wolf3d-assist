@@ -150,7 +150,7 @@
        further down) is what shows here: the left stick moves + strafes,
        the right stick turns and doubles as Fire on a tap (see
        assist_set_move/assist_set_turn in wl_game.cpp and
-       setupTurnStickTap below) when touch applies, Space uses either
+       setupTurnStick below) when touch applies, Space uses either
        way. */
     .game-controls {
       width: 100%;
@@ -293,7 +293,7 @@
        row with USE rather than anchoring the whole control bar, and its
        knob is tinted the same orange/red as the old dedicated FIRE
        button -- as a visual reminder that touching it fires (see
-       setupTurnStickTap below: a tap fires, a drag turns). */
+       setupTurnStick below: a tap fires, a drag turns). */
     .touch-joystick-turn {
       width: 110px;
       height: 110px;
@@ -658,7 +658,7 @@
           <div class="touch-controls-row">
             <!-- Twin-stick: left stick moves (forward/back + strafe left/
                  right), right stick turns and doubles as Fire -- touching
-                 it without dragging fires (see setupTurnStickTap below),
+                 it without dragging fires (see setupTurnStick below),
                  dragging it turns. Left as-is (not hidden) in menu mode
                  too -- it's inert there, and hiding/showing just this one
                  piece wasn't worth the extra bookkeeping. -->
@@ -1562,7 +1562,7 @@
     // A real hold button (as long as your finger is down, the key is
     // down), not a tap -- Use needs continuous key state to work like the
     // physical control it's standing in for. Fire is tap-only, on the
-    // turn stick below (setupTurnStickTap), not a hold button.
+    // turn stick below (setupTurnStick), not a hold button.
     function bindHoldButton(el, keyName) {
       var active = false;
       var k = KEYS[keyName];
@@ -1661,45 +1661,86 @@
     // tap, not a hold-to-turn. Firing for the entire duration a hold is
     // down (matching the old dedicated FIRE button's hold-to-fire
     // behavior) would burn ammo just from turning, since turning *is*
-    // holding the stick down. Feeds assist_set_turn (wl_game.cpp), which
-    // adds it into controlx every frame like mouse-look does.
-    setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 38, 6, function (dx) {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try { Module.ccall("assist_set_turn", null, ["number"], [dx]); }
-      catch (e) { /* engine not ready yet */ }
-    });
+    // holding the stick down.
+    //
+    // This can't just be setupStick (used for the move stick above) plus
+    // a separate tap/drag observer watching the same events on the side
+    // -- that was tried first, and it fired *and* turned on every tap:
+    // setupStick's own pointerdown applies a turn immediately, based on
+    // distance from the stick's *center*, and unless your finger lands on
+    // the exact center pixel that's already nonzero on the very first
+    // frame, before the separate observer's own drag threshold (measured
+    // from the touch's own start point, a completely different reference
+    // point) ever got a chance to suppress it -- two independent handlers
+    // racing on the same element, one of them always winning first. So
+    // this is one state machine instead: nothing happens on pointerdown
+    // except recording where the touch started; only once the touch has
+    // moved past DRAG_THRESHOLD from *that* point does it start behaving
+    // like a stick at all (moving the knob, calling assist_set_turn).
+    // Released before crossing that threshold -> a pure tap -> fires,
+    // having applied zero turn the whole time.
+    (function setupTurnStick() {
+      var base = document.getElementById("tc-turn-joystick");
+      var knob = document.getElementById("tc-turn-joystick-knob");
+      var maxDist = 38, deadzone = 6;
+      var DRAG_THRESHOLD = 16; // px from this touch's own start before it counts as a turn-drag, not a tap
+      var pointerId = null, startX = 0, startY = 0, dragging = false;
 
-    // Tap-to-fire, tracked independently of setupStick's own drag/deflection
-    // handling above -- reusing that deflection value (distance from the
-    // *stick's center*) to tell a tap from a drag is wrong: unless your
-    // finger lands on the exact center pixel, it's already several pixels
-    // from center on the very first frame, before any real movement, so
-    // most taps would be wrongly read as drags and never fire -- worse the
-    // closer to the edge you tapped, which reads as location-dependent.
-    // This instead tracks distance from wherever *this touch itself*
-    // started, completely independent of the stick's center or visuals,
-    // so a tap fires reliably no matter where on the stick it lands.
-    (function setupTurnStickTap() {
-      var el = document.getElementById("tc-turn-joystick");
-      var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
-      var pointerId = null, startX = 0, startY = 0, dragged = false;
+      function setTurn(dx) {
+        if (typeof Module === "undefined" || !Module.ccall) return;
+        try { Module.ccall("assist_set_turn", null, ["number"], [dx]); }
+        catch (e) { /* engine not ready yet */ }
+      }
 
-      el.addEventListener("pointerdown", function (e) {
+      function updateKnob(clientX, clientY) {
+        var rect = base.getBoundingClientRect();
+        var dx = clientX - (rect.left + rect.width / 2);
+        var dy = clientY - (rect.top + rect.height / 2);
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var clamped = Math.min(dist, maxDist);
+        var angle = Math.atan2(dy, dx);
+        var kx = Math.cos(angle) * clamped, ky = Math.sin(angle) * clamped;
+        knob.style.transform = "translate(calc(-50% + " + kx + "px), calc(-50% + " + ky + "px))";
+
+        if (dist < deadzone) { setTurn(0); return; }
+        var pct = clamped / maxDist; // 0..1, proportional to push distance
+        setTurn(Math.round((kx / clamped) * pct * 100));
+      }
+
+      base.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
         pointerId = e.pointerId;
         startX = e.clientX;
         startY = e.clientY;
-        dragged = false;
+        dragging = false;
+        try { base.setPointerCapture(e.pointerId); } catch (err) {}
+        document.getElementById("canvas").focus();
+        // Deliberately not calling updateKnob here -- see the big comment
+        // above for why applying anything before the drag threshold is
+        // what caused every tap to also turn.
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
-        var dx = e.clientX - startX, dy = e.clientY - startY;
-        if (Math.sqrt(dx * dx + dy * dy) > TAP_MOVE_THRESHOLD) dragged = true;
+        if (!dragging) {
+          var dx = e.clientX - startX, dy = e.clientY - startY;
+          if (Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) return;
+          dragging = true;
+        }
+        updateKnob(e.clientX, e.clientY);
       });
-      window.addEventListener("pointerup", function (e) {
+      function endDrag(e) {
         if (e.pointerId !== pointerId) return;
         pointerId = null;
-        if (!dragged) tap("Control");
-      });
+        if (dragging) {
+          knob.style.transform = "translate(-50%, -50%)";
+          setTurn(0);
+        } else {
+          tap("Control");
+        }
+        dragging = false;
+      }
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("pointercancel", endDrag);
     })();
 
     // ---- 7. Control-mode switch: keyboard legend vs. touch controls ----
