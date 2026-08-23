@@ -110,11 +110,14 @@
     .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
     /* Game controls strip: below the canvas (not overlaid on top of it --
        an overlay partially obscures the 3D view, a strip underneath
-       doesn't). Pause always shows; the twin-stick/use row only shows on
-       actual touchscreens (real mice/trackpads already have keyboard
-       access): the left stick moves + strafes, the right stick turns and
-       doubles as Fire on a tap (see assist_set_move/assist_set_turn in
-       wl_game.cpp and setupTurnStickTap below), Space uses. */
+       doesn't). The twin-stick/use row and the keyboard legend below are
+       mutually exclusive -- whichever one currently applies (see the
+       auto-detect media query and the manual force-*-controls override
+       further down) is what shows here: the left stick moves + strafes,
+       the right stick turns and doubles as Fire on a tap (see
+       assist_set_move/assist_set_turn in wl_game.cpp and
+       setupTurnStickTap below) when touch applies, Space uses either
+       way. */
     .game-controls {
       width: 100%;
       max-width: 1100px;
@@ -126,15 +129,100 @@
     }
     .touch-controls {
       display: none;
-      width: 100%;
-      justify-content: space-between;
+      flex-direction: column;
       align-items: center;
+      gap: 8px;
+      width: 100%;
       padding: 4px 16px 10px;
     }
-    @media (hover: none) and (pointer: coarse) {
+    .touch-controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .key-legend {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 8px 18px;
+      width: 100%;
+      padding: 4px 16px 10px;
+      font-size: 15px;
+      color: var(--text-dim);
+    }
+    .key-legend-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .key-legend-group span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .key-legend kbd {
+      display: inline-block;
+      min-width: 1.3em;
+      padding: 2px 6px;
+      border: 1px solid var(--bevel-light);
+      border-bottom: 2px solid var(--bevel-dark);
+      border-radius: 4px;
+      background: var(--stone-dark);
+      color: var(--white);
+      font-family: inherit;
+      font-size: 15px;
+      text-align: center;
+    }
+    .control-mode-switch {
+      align-self: center;
+      margin-top: 2px;
+      padding: 5px 10px;
+      background: transparent;
+      border: 1px solid var(--bevel-light);
+      border-radius: 4px;
+      color: var(--blue-bright);
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .control-mode-switch:hover { background: rgba(74, 122, 168, 0.15); }
+    /* Auto-detect default: coarse pointer (touch-sized targets) and no
+       fine pointer anywhere, not just `(pointer: coarse)` alone. `pointer`
+       only reflects the *primary* pointer's precision, and a touchscreen
+       -equipped laptop commonly reports that as coarse even with a real
+       mouse/trackpad attached and in active use -- `any-pointer: fine`
+       checks every input mechanism, not just the primary one, so it
+       correctly stays true on that hybrid hardware while still being
+       false on an actual phone or tablet. Placed after the base
+       .key-legend/.touch-controls rules above so it wins regardless of
+       source order within those rules; the manual override further below
+       is placed later still, so it wins over *this*, too. */
+    @media (pointer: coarse) and (not (any-pointer: fine)) {
+      .key-legend { display: none; }
       .touch-controls { display: flex; }
     }
+    /* Manual override for when the auto-detect above guesses wrong --
+       e.g. a touchscreen-equipped desktop that still wants the keyboard
+       legend despite (pointer: coarse), or a device whose OS changes what
+       it reports for pointer capability between orientations with a
+       detachable keyboard. Toggled by the two .control-mode-switch
+       buttons (see attachControlModeSwitch below); body-scoped classes so
+       their specificity beats the plain rules above regardless of source
+       order or which media query matched. */
+    body.force-touch-controls .key-legend { display: none; }
+    body.force-touch-controls .touch-controls { display: flex; }
+    body.force-keyboard-controls .key-legend { display: flex; }
+    body.force-keyboard-controls .touch-controls { display: none; }
     .touch-group { display: flex; gap: 10px; align-items: center; }
+    /* This project's own `display: flex` above is an *author* rule, which
+       always wins over the browser's built-in `[hidden] { display: none }`
+       UA rule regardless of selector specificity -- so setting .hidden on
+       #tc-play-group/#tc-menu-group did nothing without this override,
+       and both touch control sets rendered on top of each other at once. */
+    #tc-play-group[hidden], #tc-menu-group[hidden] { display: none; }
     /* Stylized to read as physical hardware -- radial-gradient shading for
        a molded-plastic look, an offset solid shadow ("0 Npx 0 <color>")
        for a raised 3D button that visibly depresses on :active. */
@@ -231,6 +319,22 @@
         inset 0 2px 3px rgba(255, 255, 255, 0.15);
     }
     .touch-btn-use {
+      font-size: 13px;
+      background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
+    }
+    /* Back -- shown in place of the move/turn sticks and USE whenever a
+       menu might be on screen (title/demo, pause menu, save/load, ...);
+       see pollTouchMenuMode below. Smaller than the play-mode controls
+       since it doesn't need as big a hit target, and there's only ever
+       the one button here -- selecting a menu item is done by tapping it
+       directly (see the canvas pointerup handler and assist_menu_* in
+       wl_menu.cpp), Back is the one thing a tap can't do. */
+    .touch-btn-small {
+      width: 52px;
+      height: 52px;
+      font-size: 20px;
+    }
+    .touch-btn-back {
       font-size: 13px;
       background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
     }
@@ -487,22 +591,63 @@
 
       <div class="game-controls" id="game-controls">
         <div class="touch-controls">
-          <!-- Twin-stick: left stick moves (forward/back + strafe left/
-               right), right stick turns and doubles as Fire -- touching
-               it without dragging fires (see setupTurnStickTap below),
-               dragging it turns. Space still uses via the dedicated
-               button below, independent of either stick. -->
-          <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
-            <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
-            <span class="touch-joystick-label">Move</span>
-          </div>
-          <div class="touch-group touch-group-right">
-            <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
-            <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
-              <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
-              <span class="touch-joystick-label">Turn / Fire</span>
+          <div class="touch-controls-row">
+            <!-- Twin-stick: left stick moves (forward/back + strafe left/
+                 right), right stick turns and doubles as Fire -- touching
+                 it without dragging fires (see setupTurnStickTap below),
+                 dragging it turns. Left as-is (not hidden) in menu mode
+                 too -- it's inert there, and hiding/showing just this one
+                 piece wasn't worth the extra bookkeeping. -->
+            <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
+              <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
+              <span class="touch-joystick-label">Move</span>
+            </div>
+            <!-- Shown instead of tc-menu-group whenever real gameplay is
+                 on screen (see pollTouchMenuMode below); Space still uses
+                 via the dedicated button here. -->
+            <div class="touch-group touch-group-right" id="tc-play-group">
+              <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+              <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
+                <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
+                <span class="touch-joystick-label">Turn / Fire</span>
+              </div>
+            </div>
+            <!-- Shown instead of tc-play-group whenever a menu might be on
+                 screen (title/demo, pause, save/load, ...) -- see
+                 pollTouchMenuMode below. Selecting an item is done by
+                 tapping it directly on the game screen itself (see the
+                 canvas pointerup handler below, and assist_menu_* in
+                 wl_menu.cpp) -- Back is the one thing a tap can't do
+                 (there's no "tap to go back" gesture), and it's also the
+                 universal cancel/dismiss for a Y/N prompt (e.g. the Quit
+                 confirmation), which isn't a tappable itemized menu at
+                 all. -->
+            <div class="touch-group touch-group-right" id="tc-menu-group" hidden>
+              <button class="touch-btn touch-btn-small touch-btn-back" id="tc-menu-back" aria-label="Back">BACK</button>
             </div>
           </div>
+          <!-- Its own row below the joystick/buttons, not squeezed in
+               alongside them. -->
+          <button id="switch-to-keyboard-btn" class="control-mode-switch" type="button">Switch to keyboard controls</button>
+        </div>
+        <!-- Shown on non-touch devices by default (see the auto-detect
+             media query in <style>); real Wolf4SDL keyboard bindings
+             (buttonscan/dirscan in wl_play.cpp), not assist-mode
+             shortcuts. -->
+        <div class="key-legend">
+          <div class="key-legend-group">
+            <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> Move forward / back</span>
+            <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> Turn</span>
+            <span><kbd>Alt</kbd> + <kbd>&larr;</kbd><kbd>&rarr;</kbd> Strafe</span>
+            <span><kbd>Shift</kbd> (hold) Run</span>
+          </div>
+          <div class="key-legend-group">
+            <span><kbd>Ctrl</kbd> Fire</span>
+            <span><kbd>Space</kbd> Use / open</span>
+            <span><kbd>1</kbd>-<kbd>4</kbd> Weapons</span>
+            <span><kbd>Esc</kbd> Menu</span>
+          </div>
+          <button id="switch-to-touch-btn" class="control-mode-switch" type="button">Switch to touch controls</button>
         </div>
       </div>
     </div>
@@ -1029,7 +1174,8 @@
       DownArrow: ["ArrowDown", "ArrowDown", 40],
       LeftArrow: ["ArrowLeft", "ArrowLeft", 37],
       RightArrow: ["ArrowRight", "ArrowRight", 39],
-      Control: ["ControlLeft", "Control", 17]
+      Control: ["ControlLeft", "Control", 17],
+      Escape: ["Escape", "Escape", 27]
     };
     for (var d = 0; d <= 9; d++) {
       KEYS["Digit" + d] = ["Digit" + d, String(d), 48 + d];
@@ -1114,16 +1260,69 @@
     async function sendPause() { document.getElementById("canvas").focus(); await tap("Pause"); }
     async function sendResume() { document.getElementById("canvas").focus(); await tap("Space"); }
 
-    // No dedicated button -- tapping the game screen itself toggles
-    // pause. Scoped to touch input only: on desktop, a left click on the
-    // canvas already fires the weapon (buttonmouse[0] == bt_attack in
-    // wl_play.cpp), so treating clicks as pause there would make mouse
-    // play unusable. Touch has no such conflict since tapping the canvas
-    // isn't bound to any action in the touch control scheme.
+    // Wolf4SDL's menu system draws in a fixed 320x200 logical coordinate
+    // space (see scaleFactor = screenWidth/320 in id_vl.cpp) regardless of
+    // how large the canvas is actually displayed on screen -- so a tapped
+    // point has to be rescaled from real on-screen CSS pixels into that
+    // fixed 200-tall space before it means anything to assist_menu_base_y's
+    // Y value. This ratio-based approach (tap fraction of the canvas's
+    // rendered height, times 200) gives the right answer regardless of the
+    // CSS/device scaling in between, without this file needing to know or
+    // track it.
+    var WOLF_SCREENHEIGHT = 200;
+    // Every menu item is exactly this many logical pixels below the last,
+    // starting at assist_menu_base_y() -- see the `y = basey + which * 13`
+    // math in HandleMenu (wl_menu.cpp); it's a real engine constant, not a
+    // guess, just not one that's worth adding a whole new assist export to
+    // expose since it never changes at runtime.
+    var WOLF_MENU_LINEHEIGHT = 13;
+
+    // Tapping the game screen does one of three different things,
+    // depending on what's actually showing there right now:
+    //   1. Actually playing (knownInGameplay) -> toggle pause, same as
+    //      before this feature existed.
+    //   2. A real itemized menu is up (Main Menu, New Game, Episode,
+    //      Load/Save, ...) -> figure out which item the tap's Y
+    //      coordinate falls on and select *that one specifically*
+    //      (assist_menu_set_item, wl_menu.cpp), then confirm it with a
+    //      real Enter -- this replaces having to hunt for dedicated
+    //      Up/Down/Select buttons with tapping the item you actually
+    //      want directly.
+    //   3. Anything else (the attract-mode title/demo loop, or a Y/N
+    //      prompt like the Quit confirmation, which isn't an itemized
+    //      menu at all -- see assist_menu_item_count's own check) -> just
+    //      send Enter, which is what actually interrupts the demo and
+    //      opens the menu in the first place. Without this, a touch-only
+    //      player would have no way to ever start a game at all: the
+    //      title screen's attract-mode demo just loops forever, and
+    //      there's no keyboard to press Enter on.
+    //
+    // Scoped to touch input only: on desktop, a left click on the canvas
+    // already fires the weapon (buttonmouse[0] == bt_attack in
+    // wl_play.cpp), so treating clicks as pause/menu-select there would
+    // make mouse play unusable. Touch has no such conflict since tapping
+    // the canvas isn't bound to any action in the touch control scheme.
     document.getElementById("canvas").addEventListener("pointerup", function (e) {
       if (e.pointerType !== "touch") return;
-      if (knownPaused) { sendResume(); toast("Resumed"); }
-      else { sendPause(); toast("Paused — tap the screen to resume"); }
+      if (knownInGameplay) {
+        if (knownPaused) { sendResume(); toast("Resumed"); }
+        else { sendPause(); toast("Paused — tap the screen to resume"); }
+        return;
+      }
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var itemCount = Module.ccall("assist_menu_item_count", "number", [], []);
+        if (itemCount > 0) {
+          var rect = document.getElementById("canvas").getBoundingClientRect();
+          var gameY = ((e.clientY - rect.top) / rect.height) * WOLF_SCREENHEIGHT;
+          var baseY = Module.ccall("assist_menu_base_y", "number", [], []);
+          var index = Math.floor((gameY - baseY) / WOLF_MENU_LINEHEIGHT);
+          if (index < 0) index = 0;
+          if (index > itemCount - 1) index = itemCount - 1;
+          Module.ccall("assist_menu_set_item", null, ["number"], [index]);
+        }
+      } catch (err) { /* engine not ready yet */ }
+      tap("Enter");
     });
 
     function pollPaused() {
@@ -1133,6 +1332,46 @@
       } catch (e) { /* engine not ready yet */ }
     }
     setInterval(pollPaused, 800);
+
+    // ---- Touch menu navigation ----
+    // A menu (title/demo, in-game Esc menu, save/load, ...) can be on
+    // screen at almost any point, and Wolf4SDL's menus are entirely
+    // keyboard-driven with no touch/tap-position equivalent built into the
+    // engine -- so without *some* touch mapping, a touch-only player could
+    // never start the game at all (the title screen's attract-mode demo
+    // just loops forever) or reach any menu item other than whatever the
+    // cursor defaults to. That mapping is the canvas pointerup handler
+    // above (tap-to-select, plus Enter to open the menu from the demo in
+    // the first place); what's here just decides when to offer Use/Fire
+    // (tcPlayGroup) versus the small menu Back button (tcMenuGroup)
+    // instead.
+    //
+    // Three signals, not two: ingame (wl_game.cpp) alone would call the
+    // attract-mode demo "real gameplay", since PlayLoop() (which sets it
+    // true) drives both real play and demo playback the same way -- a
+    // demo is just a level plus a prerecorded input stream, not a
+    // different game state. assist_get_menuactive() is the other half:
+    // menuactive doesn't stop gameplay simulating behind an open menu, so
+    // it's a genuinely separate condition from either of the other two,
+    // not implied by them.
+    var knownInGameplay = true; // assume real play until first poll says otherwise
+    var tcPlayGroup = document.getElementById("tc-play-group");
+    var tcMenuGroup = document.getElementById("tc-menu-group");
+
+    function pollTouchMenuMode() {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try {
+        var inGame = Module.ccall("assist_get_ingame", "number", [], []) === 1;
+        var menuActive = Module.ccall("assist_get_menuactive", "number", [], []) === 1;
+        var demoPlaying = Module.ccall("assist_get_demoplayback", "number", [], []) === 1;
+        knownInGameplay = inGame && !menuActive && !demoPlaying;
+        tcPlayGroup.hidden = !knownInGameplay;
+        tcMenuGroup.hidden = knownInGameplay;
+      } catch (e) { /* engine not ready yet */ }
+    }
+    setInterval(pollTouchMenuMode, 500);
+
+    document.getElementById("tc-menu-back").addEventListener("pointerdown", function (e) { e.preventDefault(); tap("Escape"); });
 
     // Auto-pause whenever a "See the code" link is opened, so the game
     // isn't running unattended while you're reading source in the new tab.
@@ -1281,6 +1520,47 @@
         if (e.pointerId !== pointerId) return;
         pointerId = null;
         if (!dragged) tap("Control");
+      });
+    })();
+
+    // ---- Manual override for the keyboard-legend-vs-touch-controls
+    // auto-detect (see the `(pointer: coarse) and (not (any-pointer:
+    // fine))` media query in <style>) ----
+    // That heuristic gets it wrong on real hardware in ways that aren't
+    // fixable in CSS alone -- a touchscreen-equipped desktop that still
+    // wants the keyboard legend, or a device whose OS changes what it
+    // reports for pointer capability between orientations with a
+    // detachable keyboard case. The two .control-mode-switch buttons (one
+    // embedded in each panel, so whichever one is currently showing offers
+    // a way to switch to the other) let the player just pick, and the
+    // choice is remembered per-browser via localStorage so it doesn't need
+    // re-picking every load.
+    (function attachControlModeSwitch() {
+      var STORAGE_KEY = "wolf3d-assist-control-mode";
+      var toTouchBtn = document.getElementById("switch-to-touch-btn");
+      var toKeyboardBtn = document.getElementById("switch-to-keyboard-btn");
+
+      // Toggling a class on <body> (rather than the specific elements
+      // being shown/hidden) is what lets one flag here drive both the key
+      // legend and the touch-controls row without this function needing
+      // to know or care what either one contains.
+      function apply(mode) {
+        document.body.classList.toggle("force-touch-controls", mode === "touch");
+        document.body.classList.toggle("force-keyboard-controls", mode === "keyboard");
+      }
+
+      var saved = null;
+      try { saved = window.localStorage.getItem(STORAGE_KEY); }
+      catch (e) { /* private-browsing/storage-disabled -- fall back to the CSS auto-detect default */ }
+      if (saved === "touch" || saved === "keyboard") apply(saved);
+
+      toTouchBtn.addEventListener("click", function () {
+        apply("touch");
+        try { window.localStorage.setItem(STORAGE_KEY, "touch"); } catch (e) { /* best-effort only */ }
+      });
+      toKeyboardBtn.addEventListener("click", function () {
+        apply("keyboard");
+        try { window.localStorage.setItem(STORAGE_KEY, "keyboard"); } catch (e) { /* best-effort only */ }
       });
     })();
 

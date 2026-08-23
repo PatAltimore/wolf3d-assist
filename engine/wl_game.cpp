@@ -244,6 +244,25 @@ void assist_apply_joystick(void)
 // Read by ControlMovement (wl_agent.cpp) to thrust sideways directly --
 // see the big comment above for why strafe can't just reuse controlx.
 int assist_get_strafe_dx(void) { return assist_move_dx; }
+
+// Three signals the touch UI needs together to tell "actually playing,
+// offer Fire/Use" apart from "some menu/title/demo screen is up, offer
+// tap-to-select and Back" -- no single one of these is sufficient alone:
+//   - ingame (this file) is false on the title screen AND for the whole
+//     duration of the attract-mode demo loop, since PlayLoop() (which
+//     sets it true) drives both real play and demo playback the same
+//     way -- a demo is just a level plus a prerecorded input stream, not
+//     a different game state. So ingame alone can't distinguish "really
+//     playing" from "watching the demo", which matters because a
+//     touch-only player needs *some* way to interrupt the demo and reach
+//     the menu at all.
+//   - menuactive (wl_menu.h) doesn't stop gameplay simulating behind an
+//     open menu (e.g. the in-game Esc menu), so it's a genuinely separate
+//     condition from ingame, not implied by it.
+//   - demoplayback (wl_def.h) is the other half of the ingame gap above.
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_ingame(void) { return ingame ? 1 : 0; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_menuactive(void) { return menuactive ? 1 : 0; }
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_demoplayback(void) { return demoplayback ? 1 : 0; }
 #endif
 
 #ifdef SPEAR

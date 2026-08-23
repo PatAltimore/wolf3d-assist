@@ -16,6 +16,10 @@
 
 #include "wl_def.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 extern int lastgamemusicoffset;
 extern int numEpisodesMissing;
 
@@ -3562,6 +3566,46 @@ CleanupControlPanel (void)
 }
 
 
+// --- wolf3d-assist patch: tap-to-select menu items ---
+// item_i/items are HandleMenu's own parameters, not file-scope state the
+// way DOOM's equivalent currentMenu/itemOn are (see doom-assist's m_menu.c
+// patch for that version) -- Wolf3D instead re-enters HandleMenu with a
+// fresh pair of pointers for every menu screen (Main Menu, New Game,
+// Episode, Load/Save, ...), including nested ones opened from inside a
+// selected item's routine. So this captures whichever call is currently
+// running in a couple of statics, refreshed on every entry and cleared
+// again once that call returns (including right before invoking the
+// selected item's routine, since that may show a non-itemized dialog --
+// e.g. CP_Quit's Y/N confirm -- or a nested menu of its own that will set
+// its own statics if it calls HandleMenu again). web/shell.html reads
+// these to know how many items the *currently visible* menu has and
+// where it starts, then asks for a specific one by index; the actual
+// move happens inside the loop below, the same way the keyboard's
+// initial-letter-search does it (EraseGun, move `which`, DrawGun) so a
+// tap-selected item is confirmed through the exact same Enter/Space path
+// a keyboard selection would use.
+#ifdef __EMSCRIPTEN__
+static CP_iteminfo *assist_menu_item_i = NULL;
+static int assist_menu_requested_item = -1;
+
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_menu_item_count(void)
+{
+    return assist_menu_item_i ? assist_menu_item_i->amount : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int assist_menu_base_y(void)
+{
+    // Matches HandleMenu's own `basey = item_i->y - 2` exactly, so
+    // web/shell.html's (tapY - baseY) / 13 lands on the right item.
+    return assist_menu_item_i ? assist_menu_item_i->y - 2 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_menu_set_item(int index)
+{
+    assist_menu_requested_item = index;
+}
+#endif
+
 ////////////////////////////////////////////////////////////////////
 //
 // Handle moving gun around a menu
@@ -3576,6 +3620,10 @@ HandleMenu (CP_iteminfo * item_i, CP_itemtype * items, void (*routine) (int w))
     int32_t lastBlinkTime, timer;
     ControlInfo ci;
 
+#ifdef __EMSCRIPTEN__
+    assist_menu_item_i = item_i;
+    assist_menu_requested_item = -1;
+#endif
 
     which = item_i->curpos;
     x = item_i->x & -8;
@@ -3674,6 +3722,30 @@ HandleMenu (CP_iteminfo * item_i, CP_itemtype * items, void (*routine) (int w))
         // GET INPUT
         //
         ReadAnyControl (&ci);
+
+#ifdef __EMSCRIPTEN__
+        // Tap-to-select (web/shell.html's canvas pointerup handler, via
+        // assist_menu_set_item above): jump straight to the tapped item,
+        // the same way the initial-letter search above jumps straight to
+        // a matched item -- erase the old highlight, move `which`, redraw
+        // -- rather than the North/South cases' one-step-at-a-time
+        // animation, which doesn't make sense for a tap that may be
+        // several items away.
+        if (assist_menu_requested_item >= 0)
+        {
+            int target = assist_menu_requested_item;
+            assist_menu_requested_item = -1;
+            if (target >= item_i->amount)
+                target = item_i->amount - 1;
+            if (target >= 0 && target != which && (items + target)->active)
+            {
+                EraseGun (item_i, items, x, y, which);
+                which = target;
+                DrawGun (item_i, items, x, &y, which, basey, routine);
+            }
+        }
+#endif
+
         switch (ci.dir)
         {
                 ////////////////////////////////////////////////
@@ -3782,6 +3854,14 @@ HandleMenu (CP_iteminfo * item_i, CP_itemtype * items, void (*routine) (int w))
     item_i->curpos = which;
 
     lastitem = which;
+#ifdef __EMSCRIPTEN__
+    // Clear before the item's routine runs (case 1) rather than after --
+    // that routine may show a non-itemized dialog (e.g. CP_Quit's Y/N
+    // confirm), which assist_menu_item_count() needs to correctly report
+    // as 0 items, or open a nested menu of its own that will set this
+    // static right back if it calls HandleMenu again.
+    assist_menu_item_i = NULL;
+#endif
     switch (exit)
     {
         case 1:
