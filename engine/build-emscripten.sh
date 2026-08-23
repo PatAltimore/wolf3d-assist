@@ -34,7 +34,7 @@ SRCS=(
 )
 
 CFLAGS="-sUSE_SDL=2 -sUSE_SDL_MIXER=2 -O2 -Wall -Wpointer-arith -Wreturn-type -Wwrite-strings -Wcast-align"
-LDFLAGS="-sASYNCIFY -sINITIAL_MEMORY=64MB -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web --preload-file data@/ --shell-file ../web/shell.html -sEXPORTED_FUNCTIONS=_main,_assist_get_current_level,_assist_get_map,_assist_get_mapsize,_assist_get_player_x,_assist_get_player_y,_assist_get_player_angle,_assist_is_paused,_assist_set_move,_assist_set_turn,_assist_has_autosave,_assist_autosave,_assist_get_kills,_assist_get_secrets,_assist_get_best_weapon,_assist_get_ingame,_assist_get_menuactive,_assist_get_demoplayback,_assist_menu_item_count,_assist_menu_base_y,_assist_menu_set_item -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,FS -lidbfs.js -O2"
+LDFLAGS="-sASYNCIFY -sINITIAL_MEMORY=64MB -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web --preload-file data@/ --shell-file ../web/shell.html -sEXPORTED_FUNCTIONS=_main,_assist_get_current_level,_assist_get_map,_assist_get_mapsize,_assist_get_player_x,_assist_get_player_y,_assist_get_player_angle,_assist_is_paused,_assist_set_move,_assist_set_turn,_assist_has_autosave,_assist_autosave,_assist_get_kills,_assist_get_secrets,_assist_get_best_weapon,_assist_get_ingame,_assist_get_menuactive,_assist_get_demoplayback,_assist_menu_item_count,_assist_menu_base_y,_assist_menu_set_item,_assist_switch_weapon -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,FS -lidbfs.js -O2"
 
 mkdir -p build-em
 mkdir -p data

@@ -322,6 +322,20 @@
       font-size: 13px;
       background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
     }
+    /* USE + WPN stacked instead of side by side -- same reason the old
+       USE+FIRE pairing was stacked (see the twin-stick control-scheme
+       commit): adding a third right-side control to a single row
+       squeezes the move stick down to a barely-usable width on phones. */
+    .touch-btn-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .touch-btn-weapon {
+      font-size: 12px;
+      background: radial-gradient(circle at 35% 28%, #b89a5a, #6b5530 60%, #2e2410 100%);
+    }
     /* Back -- shown in place of the move/turn sticks and USE whenever a
        menu might be on screen (title/demo, pause menu, save/load, ...);
        see pollTouchMenuMode below. Smaller than the play-mode controls
@@ -606,7 +620,19 @@
                  on screen (see pollTouchMenuMode below); Space still uses
                  via the dedicated button here. -->
             <div class="touch-group touch-group-right" id="tc-play-group">
-              <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+              <div class="touch-btn-stack">
+                <button class="touch-btn touch-btn-use" id="tc-use" aria-label="Open / use">USE</button>
+                <!-- Cycles to the next *owned* weapon (assist_switch_weapon,
+                     wl_game.cpp -- same buttonstate[bt_nextweapon] cycling
+                     a real next-weapon press uses, wraps around at
+                     gamestate.bestweapon). Not held-to-cycle: each tap is
+                     one discrete step, like tapping a real key would be.
+                     There's no separate previous-weapon button -- cycling
+                     forward repeatedly reaches every weapon eventually,
+                     and a single button was simpler than two for how
+                     rarely this needs pressing. -->
+                <button class="touch-btn touch-btn-small touch-btn-weapon" id="tc-weapon" aria-label="Next weapon">WPN</button>
+              </div>
               <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
                 <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
                 <span class="touch-joystick-label">Turn / Fire</span>
@@ -1364,14 +1390,46 @@
         var inGame = Module.ccall("assist_get_ingame", "number", [], []) === 1;
         var menuActive = Module.ccall("assist_get_menuactive", "number", [], []) === 1;
         var demoPlaying = Module.ccall("assist_get_demoplayback", "number", [], []) === 1;
+        var wasInGameplay = knownInGameplay;
         knownInGameplay = inGame && !menuActive && !demoPlaying;
         tcPlayGroup.hidden = !knownInGameplay;
         tcMenuGroup.hidden = knownInGameplay;
+
+        // Dying with no lives left (CheckHighScore's name-entry/high-score
+        // display, wl_inter.cpp) and the attract-mode title/credits/high-
+        // score cycle both funnel through here without ever becoming a
+        // real itemized menu -- assist_menu_item_count() reports 0, so
+        // tc-menu-group shows just the Back button, and the *only* actual
+        // way through either screen is tapping the game area (which sends
+        // Enter, see the canvas pointerup handler above). Nothing on
+        // screen suggests tapping does anything at that point, which is
+        // exactly what made "died with no lives left" look like a dead
+        // end on touch -- Back is right there, but it doesn't read as
+        // "press this to continue", and the actual working gesture (tap
+        // the game itself) isn't a button at all. Hinting it once, right
+        // as this state is entered, is what makes it discoverable.
+        if (wasInGameplay && !knownInGameplay) {
+          var itemCount = Module.ccall("assist_menu_item_count", "number", [], []);
+          if (itemCount === 0) toast("Tap the screen to continue");
+        }
       } catch (e) { /* engine not ready yet */ }
     }
     setInterval(pollTouchMenuMode, 500);
 
     document.getElementById("tc-menu-back").addEventListener("pointerdown", function (e) { e.preventDefault(); tap("Escape"); });
+
+    // Next-weapon: a direct C export (assist_switch_weapon, wl_game.cpp),
+    // not a synthesized keypress like the debug cheat buttons -- next-
+    // weapon (bt_nextweapon) has no default key binding at all in this
+    // codebase (buttonscan[] only initializes bt_attack..bt_readychaingun;
+    // see the comment on assist_weapon_switch_pending in wl_game.cpp), so
+    // there's no real key to fake a press of. One discrete step per tap,
+    // same as tapping a real bound key would be.
+    document.getElementById("tc-weapon").addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try { Module.ccall("assist_switch_weapon", null, [], []); } catch (err) {}
+    });
 
     // Auto-pause whenever a "See the code" link is opened, so the game
     // isn't running unattended while you're reading source in the new tab.

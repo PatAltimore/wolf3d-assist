@@ -233,12 +233,33 @@ extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_turn(int dx)
     assist_turn_dx = dx;
 }
 
+// Next-weapon touch button. Wolf4SDL already has full "cycle to the next
+// owned weapon, wrapping" logic (CheckWeaponChange, wl_agent.cpp reads
+// buttonstate[bt_nextweapon] on the rising edge -- true this tic, false
+// last) -- it's just never bound to a real key by default (buttonscan[]
+// only initializes bt_attack..bt_readychaingun; bt_nextweapon's entry is
+// 0, i.e. unbound), so there's no key to synthesize a press of. Setting
+// buttonstate directly for one tic, the same way a real keypress would
+// via PollKeyboardButtons, skips needing one -- same idea as
+// assist_move_dx/turn_dx above standing in for a real analog stick.
+static bool assist_weapon_switch_pending = false;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_switch_weapon(void)
+{
+    assist_weapon_switch_pending = true;
+}
+
 void assist_apply_joystick(void)
 {
     if (assist_turn_dx)
         controlx += (assist_turn_dx * (int)(BASEMOVE * tics)) / 100;
     if (assist_move_dy)
         controly += (assist_move_dy * (int)(BASEMOVE * tics)) / 100;
+    if (assist_weapon_switch_pending)
+    {
+        buttonstate[bt_nextweapon] = true;
+        assist_weapon_switch_pending = false;
+    }
 }
 
 // Read by ControlMovement (wl_agent.cpp) to thrust sideways directly --
