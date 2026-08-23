@@ -8,6 +8,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
   <style>
+    /* ============================================================
+       STYLE MAP
+       ============================================================
+       1. Theme tokens    -- the color palette, as CSS variables
+       2. Page shell      -- top-level layout (game area + sidebar)
+       3. Game canvas     -- the WASM <canvas> wrapper + resume banner
+       4. Game controls   -- touch sticks vs. keyboard legend (one
+                             shows, the other hides -- see part 4 below)
+       5. Assist sidebar  -- tabs, map, cheats, action log
+       6. Toast + mobile  -- feedback toasts, responsive layout
+       Each part below styles elements defined in the matching part of
+       <body> further down, and most are driven by matching logic in
+       <script> at the bottom of this file. */
+
+    /* ---- 1. Theme tokens ---- */
     :root {
       color-scheme: dark;
       /* Retro Wolf3D palette: stone brown, steel blue, bone white, gunmetal gray */
@@ -26,6 +41,12 @@
       --white: #f0ead8;
     }
     * { box-sizing: border-box; }
+    /* ---- 2. Page shell ----
+       The top-level split: .layout is a row of two flex children --
+       .game-area (canvas + its controls) and .assist-panel (the
+       tabbed sidebar) -- that collapses into a single scrolling
+       column on narrow screens (see the mobile @media block at the
+       very end of this <style> block). */
     /* Stops the browser's native pull-to-refresh/rubber-band gesture from
        triggering when scrolling reaches the top -- easy to hit by
        accident on mobile now that portrait mode makes the page scroll. */
@@ -64,6 +85,10 @@
     }
     #status { font-size: 15px; color: var(--text-dim); margin-bottom: 4px; min-height: 14px; }
     #progress { width: 300px; }
+    /* ---- 3. Game canvas ----
+       .canvas-wrap holds the actual SDL/WASM <canvas> plus the
+       "resume autosave?" banner overlaid on top of it right after
+       boot (position: absolute, so it doesn't affect layout). */
     /* Sized explicitly by JS (see sizeCanvasWrap below) before the engine
        initializes -- Wolf4SDL's SDL_WINDOW_RESIZABLE flag makes Emscripten
        auto-detect the canvas's CSS size to pick the SDL window resolution,
@@ -108,6 +133,15 @@
     .resume-banner p { margin: 0 0 10px; color: var(--white); font-size: 17px; }
     .resume-banner-actions { display: flex; gap: 10px; justify-content: center; }
     .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
+    /* ---- 4. Game controls: touch sticks vs. keyboard legend ----
+       Two completely different control surfaces share this one strip
+       below the canvas, and only one is ever visible at a time:
+       .touch-controls (twin-stick + USE/WPN/Back) for phones and
+       tablets, .key-legend (a plain reference card) for desktop.
+       Which one shows is decided by the `(pointer: coarse)` media
+       query further down, with a manual override -- the two
+       .control-mode-switch buttons, wired up in <script> -- for when
+       that guess is wrong. */
     /* Game controls strip: below the canvas (not overlaid on top of it --
        an overlay partially obscures the 3D view, a strip underneath
        doesn't). The twin-stick/use row and the keyboard legend below are
@@ -352,6 +386,14 @@
       font-size: 13px;
       background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
     }
+    /* ---- 5. Assist sidebar: tabs, map, cheats, action log ----
+       The tabbed column with three panels -- Map, Cheats, Code --
+       toggled by initTabs() in <script>, only one .assist-tabpanel
+       visible at a time. Covers the tab strip itself, cheat buttons/
+       dropdowns, the fog-of-war map canvas + its legend, and the
+       Recent Actions log + per-floor hints (both driven by polling
+       loops in <script>, since the WASM engine has no way to push
+       events out to JS on its own). */
     .assist-panel {
       flex: 0 0 340px;
       max-width: 100%;
@@ -544,6 +586,14 @@
     }
     .code-link:hover { background: var(--blue-bright); }
     .ack-note { font-size: 15px; color: var(--text-dim); margin-top: 16px; }
+    /* ---- 6. Toast + mobile layout ----
+       .toast is the small fade-in/out confirmation strip (see
+       toast() in <script>) used throughout for one-off feedback --
+       "Resumed", "God mode toggled", "Tap the screen to continue".
+       The @media block at the end of this <style> block is the one
+       place the side-by-side .layout collapses into a single
+       scrolling column for narrow screens -- everything else here is
+       a fixed, non-responsive layout otherwise. */
     .toast {
       position: fixed;
       bottom: 16px;
@@ -741,6 +791,36 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    // ================================================================
+    // SCRIPT MAP
+    // ================================================================
+    // This has no build step and no modules -- one file, top to
+    // bottom, organized into the conceptual parts below (each marked
+    // with a banner like this one as it comes up):
+    //   1. Boot: layout setup           -- canvas sizing, sidebar tabs
+    //   2. Assist-mode content          -- hints, Code Museum links, action log
+    //   3. Engine state sync (polling)  -- autosave, floor/kills/map tracking
+    //   4. Input bridge, part 1         -- faking keyboard events, debug cheats
+    //   5. Input bridge, part 2         -- pause, menu tap-to-select, mode detection
+    //   6. Input bridge, part 3         -- the on-screen touch sticks/buttons
+    //   7. Control-mode switch          -- keyboard legend vs. touch controls
+    //   8. Emscripten bootstrap         -- starts the WASM module itself
+    //
+    // The engine itself (Wolf4SDL, in engine/) is a separate C++
+    // codebase compiled to WASM -- this file is purely the browser
+    // side of the assist mode, and only ever talks to the engine
+    // through two channels: a small set of assist_* functions it
+    // exports (see the EMSCRIPTEN_KEEPALIVE functions in wl_game.cpp
+    // and wl_menu.cpp), called here via Module.ccall, and synthetic
+    // keyboard events for everything the engine has no assist export
+    // for (menus, cheats -- see part 4).
+
+    // ---- 1. Boot: layout setup ----
+    // Two things that need to happen before/alongside the engine
+    // loading, independent of anything WASM-related: giving the
+    // canvas a real pixel size (Emscripten reads this once, at init,
+    // to pick its internal resolution) and wiring up the sidebar's
+    // tab-switching.
     // ---- Canvas sizing (must run before the engine initializes -- see
     // the .canvas-wrap comment in <style> for why) ----
     var GAME_RATIO = 1280 / 800;
@@ -796,6 +876,13 @@
       });
     })();
 
+    // ---- 2. Assist-mode content ----
+    // Static reference data (which Code Museum page explains which
+    // system, and a curated hint per floor) plus the "Recent Actions"
+    // log that pairs live gameplay events with those same links. None
+    // of this reads live engine state directly -- the polling loops
+    // in part 3 below call into logAction()/renderHint() when
+    // something worth noting changes.
     // ---- Assist mode data ----
     var CODE_MUSEUM_BASE = "https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d/";
 
@@ -989,6 +1076,15 @@
     }
     renderHint(1);
 
+    // ---- 3. Engine state sync: polling loops ----
+    // The WASM engine has no way to push events out to JS -- no
+    // callbacks, no observers -- so everything from here through the
+    // fog-of-war map works the same way: a setInterval reads a
+    // handful of assist_get_* values via Module.ccall, compares them
+    // against what was last seen, and reacts (redraw, log an action,
+    // offer to resume, ...) only on an actual change. Covers:
+    // autosave, the resume-from-autosave banner, current-floor/kills/
+    // secrets/weapon tracking, and the explored-map redraw.
     // ---- Autosave (protects against accidental refresh/tab-close) ----
     // assist_autosave (wl_game.cpp) is a no-op that returns 0 unless a
     // game is actually in progress, so it's safe to call speculatively.
@@ -1172,6 +1268,13 @@
       toastTimer = setTimeout(function () { t.classList.remove("show"); }, 1600);
     }
 
+    // ---- 4. Input bridge, part 1: faking keyboard events ----
+    // Emscripten's SDL2 port listens for real browser KeyboardEvents
+    // -- there's no other way to reach the engine's input from JS.
+    // dispatchKey()/tap() synthesize those events; everything from
+    // here through the cheat buttons below is built on top of them,
+    // including the 1992 debug/cheat key combos (runDebugCheat) this
+    // sidebar's Cheats tab drives.
     // ---- Synthetic keyboard bridge into the SDL2/Emscripten engine ----
     function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -1276,6 +1379,15 @@
       logAction("cheat:warp", "Warped to Floor " + lvl, DEBUG_KEYS_LINK);
     });
 
+    // ---- 5. Input bridge, part 2: pause, menus & "what's on screen" ----
+    // Wolf4SDL has no concept of a touch tap -- every screen (title,
+    // a menu, paused, actually playing) is driven by real keys. This
+    // part is what makes a single tap on the game area do the right
+    // thing regardless of which of those screens is showing: toggle
+    // pause during real gameplay, or select+confirm a menu item by
+    // its tapped position otherwise. pollTouchMenuMode is what knows
+    // which of those is currently true, and swaps the touch UI (play
+    // controls vs. just a Back button) to match.
     // ---- Pause / resume ----
     // Sends the engine's real Pause key (SDLK_PAUSE, see assist_is_paused
     // in wl_game.cpp) rather than reimplementing pausing -- the engine
@@ -1437,6 +1549,15 @@
       if (e.target.closest(".code-link") && !knownPaused) sendPause();
     });
 
+    // ---- 6. Input bridge, part 3: the physical touch controls ----
+    // The actual on-screen joysticks and buttons drawn in the HTML
+    // above: a shared drag-tracking helper (setupStick) powers both
+    // the move and turn sticks, a tap-vs-drag helper turns the turn
+    // stick into a dual-purpose fire button, and a plain hold-button
+    // helper covers USE. Unlike part 1's synthesized keypresses, most
+    // of these call dedicated assist_set_*/assist_switch_weapon
+    // exports (wl_game.cpp) directly -- proportional analog input has
+    // no keyboard equivalent to fake.
     // ---- Touch/mobile controls ----
     // A real hold button (as long as your finger is down, the key is
     // down), not a tap -- Use needs continuous key state to work like the
@@ -1581,9 +1702,9 @@
       });
     })();
 
-    // ---- Manual override for the keyboard-legend-vs-touch-controls
-    // auto-detect (see the `(pointer: coarse) and (not (any-pointer:
-    // fine))` media query in <style>) ----
+    // ---- 7. Control-mode switch: keyboard legend vs. touch controls ----
+    // Manual override for the auto-detect in <style> (the
+    // `(pointer: coarse) and (not (any-pointer: fine))` media query).
     // That heuristic gets it wrong on real hardware in ways that aren't
     // fixable in CSS alone -- a touchscreen-equipped desktop that still
     // wants the keyboard legend, or a device whose OS changes what it
@@ -1622,6 +1743,13 @@
       });
     })();
 
+    // ---- 8. Emscripten bootstrap ----
+    // Where the actual WASM module gets configured and started. The
+    // `Module` object below is Emscripten's own hook -- everything on
+    // it (canvas, setStatus, preRun, ...) is a name it looks for by
+    // convention, not this project's invention. Mounting an
+    // IndexedDB-backed filesystem at /save here is what lets autosave
+    // (part 3, above) survive a page reload.
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
     var progressElement = document.getElementById("progress");
