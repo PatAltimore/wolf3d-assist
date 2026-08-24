@@ -393,6 +393,25 @@
       font-size: 13px;
       background: radial-gradient(circle at 35% 28%, #aeae9e, var(--gray) 60%, #45453f 100%);
     }
+    /* AUTO stacked directly above the turn/fire pill, both as plain
+       flex-column siblings -- not absolutely positioned (tried first,
+       and needed a hand-tuned pixel offset that broke as soon as the
+       pill's own centered position shifted on a different screen size).
+       A fixed small gap between two items in the same column is exact
+       and unaffected by centering elsewhere, and costs no extra row
+       width -- it stacks in the same column the pill already occupies,
+       so it doesn't squeeze the move stick the way another side-by-side
+       control would (see the USE+WPN stacking comment above). */
+    .touch-fire-turn-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .touch-btn-fire {
+      font-size: 15px;
+      background: radial-gradient(circle at 35% 28%, #e07257, #8a2c1f 60%, #45140c 100%);
+    }
     /* ---- 5. Assist sidebar: tabs, map, cheats, action log ----
        The tabbed column with three panels -- Map, Cheats, Code --
        toggled by initTabs() in <script>, only one .assist-tabpanel
@@ -665,10 +684,13 @@
           <div class="touch-controls-row">
             <!-- Twin-stick: left stick moves (forward/back + strafe left/
                  right), right stick turns and doubles as Fire -- touching
-                 it without dragging fires (see setupTurnStick below),
-                 dragging it turns. Left as-is (not hidden) in menu mode
-                 too -- it's inert there, and hiding/showing just this one
-                 piece wasn't worth the extra bookkeeping. -->
+                 it down dispatches Control for a single tap, so a tap is
+                 one shot and dragging turns instead. tc-fire (stacked
+                 above the pill below) is an *additional* dedicated Fire
+                 button, not a replacement -- see bindHoldButton's call
+                 site below. Left as-is (not hidden) in menu mode too --
+                 it's inert there, and hiding/showing just this one piece
+                 wasn't worth the extra bookkeeping. -->
             <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
               <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
               <span class="touch-joystick-label">Move</span>
@@ -690,9 +712,24 @@
                      rarely this needs pressing. -->
                 <button class="touch-btn touch-btn-small touch-btn-weapon" id="tc-weapon" aria-label="Next weapon">WPN</button>
               </div>
-              <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
-                <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
-                <span class="touch-joystick-label">Turn / Fire</span>
+              <!-- tc-fire is a sibling of the joystick element
+                   (tc-turn-joystick), not a descendant of it, so
+                   setupTurnStick's pointerdown listener (attached to the
+                   joystick itself) never sees taps on this button. -->
+              <div class="touch-fire-turn-col">
+                <!-- A real hold button (bindHoldButton, same as USE), not
+                     a tap-only one: the automatic weapons (machine gun,
+                     chaingun) fire for as long as bt_attack stays held,
+                     same as a real Ctrl key would -- the pill's own
+                     tap-to-fire is one shot per tap, so without this
+                     there was no way to hold down automatic fire by
+                     touch at all. Purely additive: the pill's tap-to-fire
+                     still works exactly as before. -->
+                <button class="touch-btn touch-btn-small touch-btn-fire" id="tc-fire" aria-label="Fire">AUTO</button>
+                <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
+                  <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
+                  <span class="touch-joystick-label">Turn / Fire</span>
+                </div>
               </div>
             </div>
             <!-- Shown instead of tc-play-group whenever a menu might be on
@@ -1568,8 +1605,10 @@
     // ---- Touch/mobile controls ----
     // A real hold button (as long as your finger is down, the key is
     // down), not a tap -- Use needs continuous key state to work like the
-    // physical control it's standing in for. Fire is tap-only, on the
-    // turn stick below (setupTurnStick), not a hold button.
+    // physical control it's standing in for, and so does AUTO (Fire) for
+    // automatic weapons: the turn stick's own tap-to-fire (setupTurnStick,
+    // below) is one shot per tap, with no way to hold it down, so a
+    // machine gun/chaingun burst needed a real hold button of its own.
     function bindHoldButton(el, keyName) {
       var active = false;
       var k = KEYS[keyName];
@@ -1592,6 +1631,13 @@
       el.addEventListener("pointerleave", release);
     }
     bindHoldButton(document.getElementById("tc-use"), "Space");
+    // Dedicated Fire button (see the HTML comment above tc-fire): the same
+    // real Fire key (Control) the turn stick's own tap-to-fire dispatches,
+    // just held for as long as the button is down instead of a fixed
+    // 70ms tap -- Wolf4SDL's own attack-state handling is what actually
+    // decides single-shot vs. automatic from there, exactly as it would
+    // for a held keyboard key.
+    bindHoldButton(document.getElementById("tc-fire"), "Control");
 
     // Shared drag-tracking behind both touch sticks below: pointer capture,
     // deadzone/clamp math, and knob positioning are identical between them
