@@ -401,11 +401,15 @@
        and unaffected by centering elsewhere, and costs no extra row
        width -- it stacks in the same column the pill already occupies,
        so it doesn't squeeze the move stick the way another side-by-side
-       control would (see the USE+WPN stacking comment above). */
+       control would (see the USE+WPN stacking comment above).
+       align-items: flex-end (not center) -- the column's own width
+       tracks its widest child (the 130px pill), so right-aligning both
+       children puts AUTO's right edge flush with the pill's right edge
+       instead of centered above its middle. */
     .touch-fire-turn-col {
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: flex-end;
       gap: 6px;
     }
     .touch-btn-fire {
