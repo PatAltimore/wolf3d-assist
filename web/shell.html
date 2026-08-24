@@ -289,18 +289,25 @@
       box-shadow: 0 5px 8px rgba(0, 0, 0, 0.55), inset 0 -3px 5px rgba(0, 0, 0, 0.18);
       pointer-events: none;
     }
-    /* Right (turn) stick: smaller than the move stick since it shares a
-       row with USE rather than anchoring the whole control bar, and its
-       knob is tinted the same orange/red as the old dedicated FIRE
-       button -- as a visual reminder that touching it fires (see
-       setupTurnStick below: a tap fires, a drag turns). */
+    /* Right (turn) stick: a horizontal slider, not a full 2D joystick --
+       turning only has one axis (left/right), so unlike the move stick
+       there's nothing a vertical component would ever mean. Shaped as a
+       pill/stadium (border-radius as an absolute px value, not the base
+       class's 50% -- 50% of a non-square box makes an ellipse, not a
+       stadium) to communicate "slides sideways" at a glance, rather than
+       just constraining a circle in JS and leaving the shape to imply
+       omnidirectional movement it doesn't have. Its knob is tinted the
+       same orange/red as the old dedicated FIRE button -- as a visual
+       reminder that touching it fires (see setupTurnStick below: a tap
+       fires, a drag turns). */
     .touch-joystick-turn {
-      width: 110px;
-      height: 110px;
+      width: 130px;
+      height: 56px;
+      border-radius: 28px;
     }
     .touch-joystick-knob-turn {
-      width: 50px;
-      height: 50px;
+      width: 46px;
+      height: 46px;
       background: radial-gradient(circle at 35% 28%, #e07257, #8a2c1f 60%, #45140c 100%);
     }
     /* Sits below the stick rather than on it -- the knob already fills
@@ -1679,12 +1686,20 @@
     // like a stick at all (moving the knob, calling assist_set_turn).
     // Released before crossing that threshold -> a pure tap -> fires,
     // having applied zero turn the whole time.
+    //
+    // Horizontal only, throughout -- turning is a single axis (controlx),
+    // so unlike the move stick's setupStick, vertical finger position
+    // never means anything here: not in the value sent to the engine, not
+    // in the knob's own position (it only ever slides left/right, matching
+    // .touch-joystick-turn's pill shape in <style>), and not in the tap-
+    // vs-drag decision either -- a vertical wiggle during a tap has zero
+    // horizontal movement, so it correctly still reads as a tap.
     (function setupTurnStick() {
       var base = document.getElementById("tc-turn-joystick");
       var knob = document.getElementById("tc-turn-joystick-knob");
-      var maxDist = 38, deadzone = 6;
-      var DRAG_THRESHOLD = 16; // px from this touch's own start before it counts as a turn-drag, not a tap
-      var pointerId = null, startX = 0, startY = 0, dragging = false;
+      var maxDist = 36, deadzone = 6;
+      var DRAG_THRESHOLD = 16; // px of horizontal movement from this touch's own start before it counts as a turn-drag, not a tap
+      var pointerId = null, startX = 0, dragging = false;
 
       function setTurn(dx) {
         if (typeof Module === "undefined" || !Module.ccall) return;
@@ -1692,26 +1707,21 @@
         catch (e) { /* engine not ready yet */ }
       }
 
-      function updateKnob(clientX, clientY) {
+      function updateKnob(clientX) {
         var rect = base.getBoundingClientRect();
         var dx = clientX - (rect.left + rect.width / 2);
-        var dy = clientY - (rect.top + rect.height / 2);
-        var dist = Math.sqrt(dx * dx + dy * dy);
-        var clamped = Math.min(dist, maxDist);
-        var angle = Math.atan2(dy, dx);
-        var kx = Math.cos(angle) * clamped, ky = Math.sin(angle) * clamped;
-        knob.style.transform = "translate(calc(-50% + " + kx + "px), calc(-50% + " + ky + "px))";
+        var clamped = Math.max(-maxDist, Math.min(maxDist, dx));
+        knob.style.transform = "translate(calc(-50% + " + clamped + "px), -50%)";
 
-        if (dist < deadzone) { setTurn(0); return; }
-        var pct = clamped / maxDist; // 0..1, proportional to push distance
-        setTurn(Math.round((kx / clamped) * pct * 100));
+        if (Math.abs(clamped) < deadzone) { setTurn(0); return; }
+        var pct = Math.abs(clamped) / maxDist; // 0..1, proportional to push distance
+        setTurn(Math.round((clamped < 0 ? -1 : 1) * pct * 100));
       }
 
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
         startX = e.clientX;
-        startY = e.clientY;
         dragging = false;
         try { base.setPointerCapture(e.pointerId); } catch (err) {}
         document.getElementById("canvas").focus();
@@ -1722,11 +1732,10 @@
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
         if (!dragging) {
-          var dx = e.clientX - startX, dy = e.clientY - startY;
-          if (Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) return;
+          if (Math.abs(e.clientX - startX) <= DRAG_THRESHOLD) return;
           dragging = true;
         }
-        updateKnob(e.clientX, e.clientY);
+        updateKnob(e.clientX);
       });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
