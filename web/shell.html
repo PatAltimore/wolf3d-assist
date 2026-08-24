@@ -1694,6 +1694,23 @@
         if (e.pointerId !== pointerId) return;
         update(e.clientX, e.clientY);
       });
+      // Some Android WebViews (confirmed on a Kindle Fire's Silk browser)
+      // dispatch pointerdown/pointerup for a captured pointer correctly
+      // but not pointermove -- the stick froze at whatever position
+      // pointerdown's own initial update() call above reported, since
+      // continuous dragging is entirely pointermove-driven and never fired
+      // again. touchmove is the older, far more universally-reliable API
+      // for exactly this, so this mirrors the same update() call from it
+      // as a redundant fallback -- on a browser where pointermove already
+      // works, this just recomputes the same position a second time,
+      // harmlessly. Not passive, so it can preventDefault the same native
+      // scroll/bounce gesture pointerdown's own preventDefault already
+      // heads off wherever that propagates correctly.
+      window.addEventListener("touchmove", function (e) {
+        if (pointerId === null || !e.touches.length) return;
+        e.preventDefault();
+        update(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
         pointerId = null;
@@ -1779,14 +1796,26 @@
         // above for why applying anything before the drag threshold is
         // what caused every tap to also turn.
       });
-      window.addEventListener("pointermove", function (e) {
-        if (e.pointerId !== pointerId) return;
+      function handleMove(clientX) {
         if (!dragging) {
-          if (Math.abs(e.clientX - startX) <= DRAG_THRESHOLD) return;
+          if (Math.abs(clientX - startX) <= DRAG_THRESHOLD) return;
           dragging = true;
         }
-        updateKnob(e.clientX);
+        updateKnob(clientX);
+      }
+      window.addEventListener("pointermove", function (e) {
+        if (e.pointerId !== pointerId) return;
+        handleMove(e.clientX);
       });
+      // See the touchmove fallback comment in setupStick above -- same
+      // underlying browser bug, needed here too since this stick's whole
+      // drag-vs-tap distinction (and the turn value itself) is entirely
+      // pointermove-driven.
+      window.addEventListener("touchmove", function (e) {
+        if (pointerId === null || !e.touches.length) return;
+        e.preventDefault();
+        handleMove(e.touches[0].clientX);
+      }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
         pointerId = null;
