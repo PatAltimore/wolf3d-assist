@@ -1656,13 +1656,19 @@
       var base = document.getElementById(baseId);
       var knob = document.getElementById(knobId);
       var pointerId = null;
-      // Latches true the first time a real pointermove ever fires (see
-      // its own listener below) and is never reset -- once a browser has
-      // proven it delivers pointermove correctly, later touchmove events
-      // are just noise to ignore rather than a second source of truth to
-      // reconcile. See the touchmove listener's own comment for why that
-      // reconciliation was itself a bug on iPhone.
-      var sawPointerMove = false;
+      // Which event type is driving the *current* gesture -- "pointer" or
+      // "touch", decided by whichever fires first after this pointerdown,
+      // and reset to null on every new one. Not a permanent once-ever
+      // decision (an earlier version latched it for the page's whole
+      // lifetime): confirmed on a Kindle Fire, pointer events there aren't
+      // simply absent, they're *unreliable* -- pointermove fires for some
+      // gestures and not others -- so a permanent latch meant the one
+      // gesture where a stray pointermove happened to fire would disable
+      // the touchmove fallback for every gesture after it, even ones
+      // where pointermove never showed up at all. Deciding fresh per
+      // gesture instead means an unlucky gesture only loses that one
+      // gesture, not the rest of the session.
+      var activeSource = null;
 
       function update(clientX, clientY) {
         var rect = base.getBoundingClientRect();
@@ -1695,6 +1701,7 @@
         // element regardless of where the finger wanders.
         try { base.setPointerCapture(e.pointerId); } catch (err) {}
         document.getElementById("canvas").focus();
+        activeSource = null;
         // Deliberately not calling update() here -- some touchscreens
         // (confirmed on a Kindle Fire) report a noisy, briefly-inaccurate
         // position for the very first event of a touch, before their
@@ -1709,35 +1716,38 @@
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
-        sawPointerMove = true;
+        if (activeSource === null) activeSource = "pointer";
+        if (activeSource !== "pointer") return;
         update(e.clientX, e.clientY);
       });
       // Some Android WebViews (confirmed on a Kindle Fire's Silk browser)
       // dispatch pointerdown/pointerup for a captured pointer correctly
-      // but not pointermove -- continuous dragging is entirely
-      // pointermove-driven, so without a fallback the stick just never
-      // moved past its (now nonexistent, see the pointerdown comment
-      // above) initial reading at all. touchmove is the older, far more
-      // universally-reliable API for exactly this, so this mirrors the
-      // same update() call from it as a fallback.
+      // but pointermove unreliably -- fires for some gestures, not for
+      // others -- so continuous dragging (entirely pointermove-driven)
+      // just silently stopped working on a gesture-by-gesture basis.
+      // touchmove is the older, far more universally-reliable API for
+      // exactly this, so this mirrors the same update() call from it as a
+      // fallback whenever a given gesture's pointermove doesn't show up.
       //
-      // Not unconditionally, though -- confirmed on an iPhone, where
-      // pointermove works fine on its own: with both listeners active,
-      // touchmove and pointermove fire for the *same* physical movement
-      // but aren't perfectly in step (iOS appears to coalesce/smooth
-      // pointer samples differently than raw touch samples), so the very
-      // first drag of a session showed the knob jump to wherever
-      // whichever event fired first put it, then jump again to wherever
-      // the other one did -- "the pill jumps left on first drag" was
-      // this, not a broken pointermove at all. The sawPointerMove latch
-      // above is what the guard below is for: once we know pointermove
-      // is real for this device, touchmove stops touching update() at
-      // all, so there's only ever one source of truth driving the knob.
-      // Not passive, so it can still preventDefault the native scroll/
-      // bounce gesture on browsers relying on this path instead.
+      // Always listening, but activeSource (see above, set fresh on every
+      // pointerdown) decides which one actually drives update() for the
+      // gesture in progress -- confirmed on an iPhone, where pointermove
+      // works fine on its own, that unconditionally letting both drive it
+      // doesn't work: touchmove and pointermove fire for the *same*
+      // physical movement but aren't perfectly in step there (iOS appears
+      // to coalesce/smooth pointer samples differently than raw touch
+      // samples), so with both live the knob visibly jumped to wherever
+      // whichever event fired first put it, then jumped again to wherever
+      // the other one did. Picking one source per gesture -- whichever
+      // fires first -- avoids that fight while still recovering per
+      // gesture on a device where pointermove isn't consistently there at
+      // all. Not passive, so it can still preventDefault the native
+      // scroll/bounce gesture on browsers relying on this path instead.
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
+        if (activeSource === null) activeSource = "touch";
+        if (activeSource !== "touch") return;
         update(e.touches[0].clientX, e.touches[0].clientY);
       }, { passive: false });
       function endDrag(e) {
@@ -1796,10 +1806,13 @@
       var maxDist = 36, deadzone = 6;
       var DRAG_THRESHOLD = 16; // px of horizontal movement from this touch's own start before it counts as a turn-drag, not a tap
       var pointerId = null, startX = 0, dragging = false;
-      // See the identical latch in setupStick above -- once pointermove
-      // has proven itself real for this device, touchmove stops driving
-      // handleMove at all, so there's only ever one source of truth.
-      var sawPointerMove = false;
+      // See the identical per-gesture source lock in setupStick above --
+      // not a permanent once-ever decision, reset fresh on every
+      // pointerdown, since pointer events being merely *unreliable*
+      // (rather than simply absent) means a permanent latch can disable
+      // the touchmove fallback for the rest of the session over a single
+      // gesture where pointermove happened to fire once.
+      var activeSource = null;
 
       function setTurn(dx) {
         if (typeof Module === "undefined" || !Module.ccall) return;
@@ -1823,6 +1836,7 @@
         pointerId = e.pointerId;
         startX = e.clientX;
         dragging = false;
+        activeSource = null;
         try { base.setPointerCapture(e.pointerId); } catch (err) {}
         document.getElementById("canvas").focus();
         // Deliberately not calling updateKnob here -- see the big comment
@@ -1838,20 +1852,23 @@
       }
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
-        sawPointerMove = true;
+        if (activeSource === null) activeSource = "pointer";
+        if (activeSource !== "pointer") return;
         handleMove(e.clientX);
       });
       // See the touchmove fallback comment in setupStick above -- same
       // underlying Android gap, needed here too since this stick's whole
       // drag-vs-tap distinction (and the turn value itself) is entirely
-      // pointermove-driven -- and the same sawPointerMove guard, needed
-      // here too for the same iPhone jump (confirmed on this stick
-      // specifically: dueling touchmove/pointermove updates during the
-      // very first drag of a session, before either had "won", showed up
-      // as the pill jumping left).
+      // pointermove-driven -- and the same per-gesture activeSource lock,
+      // needed here too for the same iPhone jump (confirmed on this stick
+      // specifically: dueling touchmove/pointermove updates during a
+      // drag, before either had "won", showed up as the pill jumping
+      // left).
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
+        if (activeSource === null) activeSource = "touch";
+        if (activeSource !== "touch") return;
         handleMove(e.touches[0].clientX);
       }, { passive: false });
       function endDrag(e) {
