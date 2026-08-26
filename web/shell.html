@@ -1792,6 +1792,18 @@
         // actually was. Leaving activeSource unclaimed here lets the
         // next real touchmove event claim the gesture instead.
         if (e.clientX === 0 && e.clientY === 0) {
+          // Confirmed on the same Kindle Fire, from its own debug log:
+          // this isn't a one-time thing per gesture -- pointermove goes
+          // good/bad/good/bad within a *single* gesture, roughly every
+          // other event. If pointer already owns this gesture, releasing
+          // the claim here (instead of just discarding this one event)
+          // is what lets touchmove step in for this specific frame rather
+          // than that frame's real data being thrown away too just
+          // because pointer happened to have already won -- a dropped
+          // frame every other update was what made "jumps left" turn
+          // into "moves, but stutters badly" once the outright jump was
+          // fixed.
+          if (activeSource === "pointer") activeSource = null;
           debugLog(tag + " pointermove IGNORED zeroed-coords");
           return;
         }
@@ -1829,7 +1841,11 @@
         // Same defensive check as pointermove above, in case this same
         // zeroing bug ever turns up on the touch side too -- neither
         // stick is ever at literal (0, 0), so this can only be bad data.
+        // Same lock-release too, for the same reason (see pointermove's
+        // own comment): a source that owns the gesture but goes bad for
+        // one frame shouldn't cost that frame entirely.
         if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
+          if (activeSource === "touch") activeSource = null;
           debugLog(tag + " touchmove IGNORED zeroed-coords");
           return;
         }
@@ -1956,6 +1972,14 @@
         // activeSource on the way there is what locked out the correctly
         // -working touchmove fallback for the rest of the gesture.
         if (e.clientX === 0) {
+          // Confirmed from the same device's own debug log: pointermove
+          // goes good/bad/good/bad within a *single* gesture here, not
+          // just once per gesture -- releasing the claim (rather than
+          // just discarding this one event) is what lets touchmove step
+          // in for this specific frame instead of that frame's real data
+          // being thrown away too just because pointer already owned the
+          // gesture. See the matching comment in setupStick above.
+          if (activeSource === "pointer") activeSource = null;
           debugLog("turn pointermove IGNORED zeroed-coords");
           return;
         }
@@ -1976,6 +2000,7 @@
         if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
         if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
+          if (activeSource === "touch") activeSource = null;
           debugLog("turn touchmove IGNORED zeroed-coords");
           return;
         }
