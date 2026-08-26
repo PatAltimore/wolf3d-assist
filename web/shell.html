@@ -150,7 +150,7 @@
        further down) is what shows here: the left stick moves + strafes,
        the right stick turns and doubles as Fire on a tap (see
        assist_set_move/assist_set_turn in wl_game.cpp and
-       setupTurnStick below) when touch applies, Space uses either
+       setupTurnStickTap below) when touch applies, Space uses either
        way. */
     .game-controls {
       width: 100%;
@@ -298,7 +298,7 @@
        just constraining a circle in JS and leaving the shape to imply
        omnidirectional movement it doesn't have. Its knob is tinted the
        same orange/red as the old dedicated FIRE button -- as a visual
-       reminder that touching it fires (see setupTurnStick below: a tap
+       reminder that touching it fires (see setupTurnStickTap below: a tap
        fires, a drag turns). */
     .touch-joystick-turn {
       width: 130px;
@@ -740,9 +740,10 @@
                 <button class="touch-btn touch-btn-small touch-btn-weapon" id="tc-weapon" aria-label="Next weapon">WPN</button>
               </div>
               <!-- tc-fire is a sibling of the joystick element
-                   (tc-turn-joystick), not a descendant of it, so
-                   setupTurnStick's pointerdown listener (attached to the
-                   joystick itself) never sees taps on this button. -->
+                   (tc-turn-joystick), not a descendant of it, so the turn
+                   stick's own pointerdown listeners (setupStick and
+                   setupTurnStickTap, attached to the joystick itself)
+                   never see taps on this button. -->
               <div class="touch-fire-turn-col">
                 <!-- A real hold button (bindHoldButton, same as USE), not
                      a tap-only one: the automatic weapons (machine gun,
@@ -861,14 +862,17 @@
 
   <div class="toast" id="toast"></div>
 
-  <!-- Temporary diagnostic overlay for tracking down a real touch-control
-       bug on a specific device (a Kindle Fire) where neither a caching
-       issue nor the pointer/touch reconciliation logic explained the
-       symptoms -- opt-in via ?debug=1 in the URL so it's invisible to
-       everyone else. Logs every raw pointerdown/pointermove/touchmove/
-       pointerup/pointercancel event both sticks receive, so what's
-       actually firing on the affected hardware can be read directly off
-       the screen instead of guessed at. See attachTouchDebug below. -->
+  <!-- Diagnostic overlay for touch-control bugs on real hardware Claude
+       has no way to test directly -- opt-in via ?debug=1 in the URL so
+       it's invisible to everyone else. Logs every raw pointerdown/
+       pointermove/pointerup/pointercancel event both sticks receive
+       (including capture success and, if it happens again, any
+       implausible coordinate like a hard-zeroed one -- see debugLog in
+       <script>), so what's actually firing on the affected device can be
+       read directly off the screen instead of guessed at. Earned its
+       keep tracking down a real Kindle Fire bug (pointermove reporting
+       hard-zeroed coordinates) that several rounds of guessing at
+       "pointermove is absent/flaky" never would have found. -->
   <div id="touch-debug" hidden></div>
 
   <script>
@@ -1349,15 +1353,15 @@
       toastTimer = setTimeout(function () { t.classList.remove("show"); }, 1600);
     }
 
-    // ---- Temporary touch-event debug log (?debug=1 only) ----
-    // For tracking down a real touch-control bug on specific hardware
-    // (a Kindle Fire) that neither a caching issue nor the pointer/touch
-    // reconciliation logic in setupStick/setupTurnStick explained --
-    // rather than guess at another blind fix, this logs every raw event
-    // either stick receives so what's actually firing on the affected
-    // device can be read directly off the screen. Capped to a few dozen
-    // lines (oldest dropped first) so a long drag can't grow the panel
-    // without bound.
+    // ---- Touch-event debug log (?debug=1 only) ----
+    // Logs every raw pointer event either stick receives, so a bug report
+    // from a device this project can't be tested on directly ("the pill
+    // jumps left", "I can only move up") can be turned into an actual
+    // event trace instead of another guess -- this is what found a real
+    // Kindle Fire bug (pointermove reporting hard-zeroed coordinates) that
+    // several rounds of guessing at "pointermove is absent/flaky" never
+    // would have. Capped to a few dozen lines (oldest dropped first) so a
+    // long drag can't grow the panel without bound.
     var DEBUG_TOUCH = /[?&]debug=1\b/.test(location.search);
     var touchDebugEl = document.getElementById("touch-debug");
     var touchDebugLines = [];
@@ -1666,7 +1670,7 @@
     // A real hold button (as long as your finger is down, the key is
     // down), not a tap -- Use needs continuous key state to work like the
     // physical control it's standing in for, and so does AUTO (Fire) for
-    // automatic weapons: the turn stick's own tap-to-fire (setupTurnStick,
+    // automatic weapons: the turn stick's own tap-to-fire (setupTurnStickTap,
     // below) is one shot per tap, with no way to hold it down, so a
     // machine gun/chaingun burst needed a real hold button of its own.
     function bindHoldButton(el, keyName) {
@@ -1708,29 +1712,52 @@
     // proportional value straight to the engine every frame, so a light
     // push moves/turns slowly and a full push moves at full speed, like
     // an actual stick.
-    function setupStick(baseId, knobId, maxDist, deadzone, onMove) {
+    //
+    // Ported from doom-assist's implementation after real-device testing:
+    // wolf3d-assist had grown an entire touchmove-fallback/source-locking
+    // layer here (a Kindle Fire seemed to need it -- pointermove looked
+    // absent, then flaky, then hard-zeroed, each diagnosis chasing the
+    // last one's leftover symptom) that doom-assist's touch sticks never
+    // had at all, and confirmed working fine on the exact same Kindle and
+    // an iPhone regardless. That's strong evidence the touchmove layer
+    // was solving a problem of its own making rather than a real gap in
+    // Pointer Events support -- plausibly the touchmove listeners'
+    // preventDefault() itself interfering with however Silk's Pointer
+    // Events are implemented underneath, though this file has no way to
+    // confirm that theory further. Reverting to plain pointerdown/
+    // pointermove/pointerup, matching doom-assist exactly, is the
+    // higher-confidence move over layering a fifth fix onto a diagnosis
+    // chain that kept being wrong.
+    //
+    // Movement is measured from wherever THIS touch first landed
+    // (originX/Y, captured on pointerdown), not from the base element's
+    // visual center. A real thumb rarely lands on the exact center pixel
+    // of a small on-screen stick; measuring from the base's true center
+    // meant an off-center tap registered as an immediate partial push in
+    // whatever direction the tap happened to land relative to center,
+    // moving the character in a direction never intended (this was
+    // "the move stick jumps forward on first tap"). Treating the touch-
+    // down point itself as "center" means a tap-and-hold in place always
+    // reads as zero deflection by construction -- dx = clientX - originX
+    // where originX *is* this event's own clientX -- with no separate
+    // "skip the first update" logic needed.
+    //
+    // xOnly (used by the turn/fire pill below): turning is a single axis
+    // in the engine (assist_set_turn takes one value, never a Y), so its
+    // track is a horizontal pill rather than a circle. Forcing dy to 0
+    // here is the only change that needs -- clamped's magnitude, the
+    // deadzone check, and the knob's own translate all already reduce to
+    // pure horizontal motion once dy is always 0, with no separate math
+    // path required.
+    function setupStick(baseId, knobId, maxDist, deadzone, onMove, onStart, onEnd, xOnly) {
       var base = document.getElementById(baseId);
       var knob = document.getElementById(knobId);
       var pointerId = null;
-      var tag = baseId; // for debugLog only -- see the block near toast() above
-      // Which event type is driving the *current* gesture -- "pointer" or
-      // "touch", decided by whichever fires first after this pointerdown,
-      // and reset to null on every new one. Not a permanent once-ever
-      // decision (an earlier version latched it for the page's whole
-      // lifetime): confirmed on a Kindle Fire, pointer events there aren't
-      // simply absent, they're *unreliable* -- pointermove fires for some
-      // gestures and not others -- so a permanent latch meant the one
-      // gesture where a stray pointermove happened to fire would disable
-      // the touchmove fallback for every gesture after it, even ones
-      // where pointermove never showed up at all. Deciding fresh per
-      // gesture instead means an unlucky gesture only loses that one
-      // gesture, not the rest of the session.
-      var activeSource = null;
+      var originX = 0, originY = 0;
 
       function update(clientX, clientY) {
-        var rect = base.getBoundingClientRect();
-        var dx = clientX - (rect.left + rect.width / 2);
-        var dy = clientY - (rect.top + rect.height / 2);
+        var dx = clientX - originX;
+        var dy = xOnly ? 0 : (clientY - originY);
         var dist = Math.sqrt(dx * dx + dy * dy);
         var clamped = Math.min(dist, maxDist);
         var angle = Math.atan2(dy, dx);
@@ -1750,6 +1777,8 @@
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
+        originX = e.clientX;
+        originY = e.clientY;
         // Without this, dragging past the stick's own edges hands the
         // gesture to whatever element is physically under the finger next,
         // which lacks touch-action:none -- the browser then tries its
@@ -1759,106 +1788,21 @@
         var captureOk = true;
         try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
         document.getElementById("canvas").focus();
-        activeSource = null;
-        debugLog(tag + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
-        // Deliberately not calling update() here -- some touchscreens
-        // (confirmed on a Kindle Fire) report a noisy, briefly-inaccurate
-        // position for the very first event of a touch, before their
-        // sensor settles a frame or two later; calling update() from that
-        // first reading meant every fresh tap on this stick started with
-        // a spurious jump (reported as always-forward) that only
-        // corrected once real panning took over. The first pointermove/
-        // touchmove below does the first real update instead, by which
-        // point the reported position matches where the finger actually
-        // is -- same fix already applied to the turn stick's pointerdown
-        // for the same class of first-event problem (see setupTurnStick).
+        debugLog(baseId + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
+        if (onStart) onStart();
+        update(e.clientX, e.clientY); // dx=dy=0 by construction -- this touch's start point *is* the origin
       });
       window.addEventListener("pointermove", function (e) {
-        if (pointerId !== null && e.pointerId !== pointerId) {
-          debugLog(tag + " pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
-        }
         if (e.pointerId !== pointerId) return;
-        // Confirmed on a Kindle Fire (via the debug log above): Silk's
-        // pointermove reports clientX/clientY hard-zeroed -- not just
-        // imprecise, literally (0, 0) -- while pointerdown/pointerup on
-        // the very same element report real coordinates fine. Neither
-        // stick is ever drawn at the literal top-left corner of the
-        // screen, so (0, 0) can only be this bug, never a genuine touch
-        // position. Bailing out *before* claiming activeSource is what
-        // matters: earlier this event would win the per-gesture race
-        // just by firing first, permanently locking out the correctly-
-        // working touchmove fallback for the whole gesture even though
-        // its own data was garbage -- that's what "jumps to the left"
-        // actually was. Leaving activeSource unclaimed here lets the
-        // next real touchmove event claim the gesture instead.
-        if (e.clientX === 0 && e.clientY === 0) {
-          // Confirmed on the same Kindle Fire, from its own debug log:
-          // this isn't a one-time thing per gesture -- pointermove goes
-          // good/bad/good/bad within a *single* gesture, roughly every
-          // other event. If pointer already owns this gesture, releasing
-          // the claim here (instead of just discarding this one event)
-          // is what lets touchmove step in for this specific frame rather
-          // than that frame's real data being thrown away too just
-          // because pointer happened to have already won -- a dropped
-          // frame every other update was what made "jumps left" turn
-          // into "moves, but stutters badly" once the outright jump was
-          // fixed.
-          if (activeSource === "pointer") activeSource = null;
-          debugLog(tag + " pointermove IGNORED zeroed-coords");
-          return;
-        }
-        if (activeSource === null) activeSource = "pointer";
-        debugLog(tag + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
-        if (activeSource !== "pointer") return;
+        debugLog(baseId + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY));
         update(e.clientX, e.clientY);
       });
-      // Some Android WebViews (confirmed on a Kindle Fire's Silk browser)
-      // dispatch pointerdown/pointerup for a captured pointer correctly,
-      // but pointermove with clientX/clientY hard-zeroed -- see the
-      // pointermove listener's own comment above. touchmove is the
-      // older, far more universally-reliable API for exactly this, so
-      // this mirrors the same update() call from it as a fallback
-      // whenever pointermove's data for a gesture turns out unusable.
-      //
-      // Always listening, but activeSource (see above, set fresh on every
-      // pointerdown) decides which one actually drives update() for the
-      // gesture in progress -- confirmed on an iPhone, where pointermove
-      // works fine on its own, that unconditionally letting both drive it
-      // doesn't work: touchmove and pointermove fire for the *same*
-      // physical movement but aren't perfectly in step there (iOS appears
-      // to coalesce/smooth pointer samples differently than raw touch
-      // samples), so with both live the knob visibly jumped to wherever
-      // whichever event fired first put it, then jumped again to wherever
-      // the other one did. Picking one source per gesture -- whichever
-      // fires first *with usable data* -- avoids that fight while still
-      // recovering per gesture on a device where pointermove doesn't
-      // actually work at all. Not passive, so it can still preventDefault
-      // the native scroll/bounce gesture on browsers relying on this
-      // path instead.
-      window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || !e.touches.length) return;
-        e.preventDefault();
-        // Same defensive check as pointermove above, in case this same
-        // zeroing bug ever turns up on the touch side too -- neither
-        // stick is ever at literal (0, 0), so this can only be bad data.
-        // Same lock-release too, for the same reason (see pointermove's
-        // own comment): a source that owns the gesture but goes bad for
-        // one frame shouldn't cost that frame entirely.
-        if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
-          if (activeSource === "touch") activeSource = null;
-          debugLog(tag + " touchmove IGNORED zeroed-coords");
-          return;
-        }
-        if (activeSource === null) activeSource = "touch";
-        debugLog(tag + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY) + " touches=" + e.touches.length + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
-        if (activeSource !== "touch") return;
-        update(e.touches[0].clientX, e.touches[0].clientY);
-      }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
-        debugLog(tag + " " + e.type + " id=" + e.pointerId);
+        debugLog(baseId + " " + e.type + " id=" + e.pointerId);
         pointerId = null;
         reset();
+        if (onEnd) onEnd();
       }
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("pointercancel", endDrag);
@@ -1876,153 +1820,66 @@
     });
 
     // Right stick: turn, and doubles as Fire -- but only for an actual
-    // tap, not a hold-to-turn. Firing for the entire duration a hold is
-    // down (matching the old dedicated FIRE button's hold-to-fire
-    // behavior) would burn ammo just from turning, since turning *is*
-    // holding the stick down.
+    // tap, not a hold-to-turn. Confirmed unwanted: firing for the entire
+    // duration a hold is down (matching the old dedicated FIRE button's
+    // hold-to-fire behavior) burns ammo just from turning, since turning
+    // *is* holding the stick down.
     //
-    // This can't just be setupStick (used for the move stick above) plus
-    // a separate tap/drag observer watching the same events on the side
-    // -- that was tried first, and it fired *and* turned on every tap:
-    // setupStick's own pointerdown applies a turn immediately, based on
-    // distance from the stick's *center*, and unless your finger lands on
-    // the exact center pixel that's already nonzero on the very first
-    // frame, before the separate observer's own drag threshold (measured
-    // from the touch's own start point, a completely different reference
-    // point) ever got a chance to suppress it -- two independent handlers
-    // racing on the same element, one of them always winning first. So
-    // this is one state machine instead: nothing happens on pointerdown
-    // except recording where the touch started; only once the touch has
-    // moved past DRAG_THRESHOLD from *that* point does it start behaving
-    // like a stick at all (moving the knob, calling assist_set_turn).
-    // Released before crossing that threshold -> a pure tap -> fires,
-    // having applied zero turn the whole time.
-    //
-    // Horizontal only, throughout -- turning is a single axis (controlx),
-    // so unlike the move stick's setupStick, vertical finger position
-    // never means anything here: not in the value sent to the engine, not
-    // in the knob's own position (it only ever slides left/right, matching
-    // .touch-joystick-turn's pill shape in <style>), and not in the tap-
-    // vs-drag decision either -- a vertical wiggle during a tap has zero
-    // horizontal movement, so it correctly still reads as a tap.
-    (function setupTurnStick() {
-      var base = document.getElementById("tc-turn-joystick");
-      var knob = document.getElementById("tc-turn-joystick-knob");
-      var maxDist = 36, deadzone = 6;
-      var DRAG_THRESHOLD = 16; // px of horizontal movement from this touch's own start before it counts as a turn-drag, not a tap
-      var pointerId = null, startX = 0, dragging = false;
-      // See the identical per-gesture source lock in setupStick above --
-      // not a permanent once-ever decision, reset fresh on every
-      // pointerdown, since pointer events being merely *unreliable*
-      // (rather than simply absent) means a permanent latch can disable
-      // the touchmove fallback for the rest of the session over a single
-      // gesture where pointermove happened to fire once.
-      var activeSource = null;
+    // turnStickDragged (set by setupTurnStickTap below) is the same "has
+    // this touch moved past the tap threshold" flag that decides whether
+    // release fires -- reused here so a tap doesn't *also* turn. Without
+    // this, setupStick's update() computes turn from distance to this
+    // touch's own origin starting on the very first pointerdown frame, so
+    // *any* movement at all (including the couple of pixels a real tap
+    // never lands perfectly still through) would nudge the view before
+    // the tap/drag distinction below ever got a say.
+    var turnStickDragged = false;
+    setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 36, 6, function (dx) {
+      if (typeof Module === "undefined" || !Module.ccall) return;
+      try { Module.ccall("assist_set_turn", null, ["number"], [turnStickDragged ? dx : 0]); }
+      catch (e) { /* engine not ready yet */ }
+    }, function onStart() {
+      // Runs before this pointerdown's first update()/onMove() above, so
+      // clearing the flag here (rather than in setupTurnStickTap's own
+      // pointerdown handler below) guarantees a fresh touch never inherits
+      // "dragged" from the gesture before it, regardless of which of the
+      // two pointerdown listeners on this element happens to run first.
+      turnStickDragged = false;
+    }, null, true /* xOnly */);
 
-      function setTurn(dx) {
-        if (typeof Module === "undefined" || !Module.ccall) return;
-        try { Module.ccall("assist_set_turn", null, ["number"], [dx]); }
-        catch (e) { /* engine not ready yet */ }
-      }
+    // Tap-to-fire, tracked independently of setupStick's own drag/deflection
+    // handling above -- reusing that deflection value (distance from this
+    // touch's own origin) to tell a tap from a drag is wrong: the origin
+    // *is* wherever the touch started, so it's zero on the very first
+    // frame regardless of tap vs. drag, and only diverges once real
+    // movement happens -- exactly the ambiguity turnStickDragged above
+    // exists to resolve, not something to re-derive from the same value a
+    // second way. This instead tracks distance from wherever *this touch
+    // itself* started using its own independent listeners, so a tap fires
+    // reliably no matter where on the stick it lands.
+    (function setupTurnStickTap() {
+      var el = document.getElementById("tc-turn-joystick");
+      var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
+      var pointerId = null, startX = 0;
 
-      function updateKnob(clientX) {
-        var rect = base.getBoundingClientRect();
-        var dx = clientX - (rect.left + rect.width / 2);
-        var clamped = Math.max(-maxDist, Math.min(maxDist, dx));
-        knob.style.transform = "translate(calc(-50% + " + clamped + "px), -50%)";
-
-        if (Math.abs(clamped) < deadzone) { setTurn(0); return; }
-        var pct = Math.abs(clamped) / maxDist; // 0..1, proportional to push distance
-        setTurn(Math.round((clamped < 0 ? -1 : 1) * pct * 100));
-      }
-
-      base.addEventListener("pointerdown", function (e) {
-        e.preventDefault();
+      el.addEventListener("pointerdown", function (e) {
         pointerId = e.pointerId;
         startX = e.clientX;
-        dragging = false;
-        activeSource = null;
-        var captureOk = true;
-        try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
-        document.getElementById("canvas").focus();
-        debugLog("turn pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
-        // Deliberately not calling updateKnob here -- see the big comment
-        // above for why applying anything before the drag threshold is
-        // what caused every tap to also turn.
+        turnStickDragged = false;
       });
-      function handleMove(clientX) {
-        if (!dragging) {
-          if (Math.abs(clientX - startX) <= DRAG_THRESHOLD) return;
-          dragging = true;
-        }
-        updateKnob(clientX);
-      }
       window.addEventListener("pointermove", function (e) {
-        if (pointerId !== null && e.pointerId !== pointerId) {
-          debugLog("turn pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
-        }
         if (e.pointerId !== pointerId) return;
-        // Confirmed via the debug log: Silk's pointermove on a Kindle
-        // Fire reports clientX/clientY hard-zeroed -- this stick is never
-        // drawn at literal x=0, so that can only be this bug, not a real
-        // touch position. See the matching comment in setupStick's own
-        // pointermove listener for the full story -- this was the actual
-        // cause of "the pill jumps left": clamping (0 - centerX) to
-        // maxDist is a hard-left deflection every time, and claiming
-        // activeSource on the way there is what locked out the correctly
-        // -working touchmove fallback for the rest of the gesture.
-        if (e.clientX === 0) {
-          // Confirmed from the same device's own debug log: pointermove
-          // goes good/bad/good/bad within a *single* gesture here, not
-          // just once per gesture -- releasing the claim (rather than
-          // just discarding this one event) is what lets touchmove step
-          // in for this specific frame instead of that frame's real data
-          // being thrown away too just because pointer already owned the
-          // gesture. See the matching comment in setupStick above.
-          if (activeSource === "pointer") activeSource = null;
-          debugLog("turn pointermove IGNORED zeroed-coords");
-          return;
-        }
-        if (activeSource === null) activeSource = "pointer";
-        debugLog("turn pointermove x=" + Math.round(e.clientX) + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
-        if (activeSource !== "pointer") return;
-        handleMove(e.clientX);
+        // Horizontal distance only, matching setupStick's own xOnly turn
+        // this control uses -- a finger drifting vertically on the pill
+        // doesn't turn anything, so it shouldn't cancel the tap either.
+        var dx = e.clientX - startX;
+        if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
-      // See the touchmove fallback comment in setupStick above -- same
-      // underlying Android bug, needed here too since this stick's whole
-      // drag-vs-tap distinction (and the turn value itself) is entirely
-      // pointermove-driven -- and the same per-gesture activeSource lock,
-      // needed here too for the same iPhone jump (confirmed on this stick
-      // specifically: dueling touchmove/pointermove updates during a
-      // drag, before either had "won", showed up as the pill jumping
-      // left).
-      window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || !e.touches.length) return;
-        e.preventDefault();
-        if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
-          if (activeSource === "touch") activeSource = null;
-          debugLog("turn touchmove IGNORED zeroed-coords");
-          return;
-        }
-        if (activeSource === null) activeSource = "touch";
-        debugLog("turn touchmove x=" + Math.round(e.touches[0].clientX) + " touches=" + e.touches.length + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
-        if (activeSource !== "touch") return;
-        handleMove(e.touches[0].clientX);
-      }, { passive: false });
-      function endDrag(e) {
+      window.addEventListener("pointerup", function (e) {
         if (e.pointerId !== pointerId) return;
-        debugLog("turn " + e.type + " id=" + e.pointerId + " dragging=" + dragging);
         pointerId = null;
-        if (dragging) {
-          knob.style.transform = "translate(-50%, -50%)";
-          setTurn(0);
-        } else {
-          tap("Control");
-        }
-        dragging = false;
-      }
-      window.addEventListener("pointerup", endDrag);
-      window.addEventListener("pointercancel", endDrag);
+        if (!turnStickDragged) tap("Control");
+      });
     })();
 
     // ---- 7. Control-mode switch: keyboard legend vs. touch controls ----
