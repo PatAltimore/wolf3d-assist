@@ -641,6 +641,29 @@
     }
     .toast.show { opacity: 1; }
 
+    /* Temporary (?debug=1 only) touch-event log -- see the HTML comment
+       above #touch-debug and attachTouchDebug in <script>. Pinned to the
+       top so it can't end up underneath the game controls it's reporting
+       on; scrolls its own content instead of growing the page, since the
+       log can get long fast during an active drag. */
+    #touch-debug {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      max-height: 40vh;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.85);
+      color: #7fff7f;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      padding: 6px 8px;
+      z-index: 1000;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
     /* Mobile portrait: stack everything in one scrolling column instead
        of the game+sidebar side-by-side layout -- game at top, its
        controls directly below it, then the tabbed panel. No per-section
@@ -837,6 +860,16 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Temporary diagnostic overlay for tracking down a real touch-control
+       bug on a specific device (a Kindle Fire) where neither a caching
+       issue nor the pointer/touch reconciliation logic explained the
+       symptoms -- opt-in via ?debug=1 in the URL so it's invisible to
+       everyone else. Logs every raw pointerdown/pointermove/touchmove/
+       pointerup/pointercancel event both sticks receive, so what's
+       actually firing on the affected hardware can be read directly off
+       the screen instead of guessed at. See attachTouchDebug below. -->
+  <div id="touch-debug" hidden></div>
 
   <script>
     // ================================================================
@@ -1316,6 +1349,29 @@
       toastTimer = setTimeout(function () { t.classList.remove("show"); }, 1600);
     }
 
+    // ---- Temporary touch-event debug log (?debug=1 only) ----
+    // For tracking down a real touch-control bug on specific hardware
+    // (a Kindle Fire) that neither a caching issue nor the pointer/touch
+    // reconciliation logic in setupStick/setupTurnStick explained --
+    // rather than guess at another blind fix, this logs every raw event
+    // either stick receives so what's actually firing on the affected
+    // device can be read directly off the screen. Capped to a few dozen
+    // lines (oldest dropped first) so a long drag can't grow the panel
+    // without bound.
+    var DEBUG_TOUCH = /[?&]debug=1\b/.test(location.search);
+    var touchDebugEl = document.getElementById("touch-debug");
+    var touchDebugLines = [];
+    if (DEBUG_TOUCH) touchDebugEl.hidden = false;
+    function debugLog(msg) {
+      if (!DEBUG_TOUCH) return;
+      var t = new Date();
+      var stamp = ("0" + t.getMinutes()).slice(-2) + ":" + ("0" + t.getSeconds()).slice(-2) + "." + ("00" + t.getMilliseconds()).slice(-3);
+      touchDebugLines.push(stamp + " " + msg);
+      if (touchDebugLines.length > 40) touchDebugLines.shift();
+      touchDebugEl.textContent = touchDebugLines.join("\n");
+      touchDebugEl.scrollTop = touchDebugEl.scrollHeight;
+    }
+
     // ---- 4. Input bridge, part 1: faking keyboard events ----
     // Emscripten's SDL2 port listens for real browser KeyboardEvents
     // -- there's no other way to reach the engine's input from JS.
@@ -1656,6 +1712,7 @@
       var base = document.getElementById(baseId);
       var knob = document.getElementById(knobId);
       var pointerId = null;
+      var tag = baseId; // for debugLog only -- see the block near toast() above
       // Which event type is driving the *current* gesture -- "pointer" or
       // "touch", decided by whichever fires first after this pointerdown,
       // and reset to null on every new one. Not a permanent once-ever
@@ -1699,9 +1756,11 @@
         // native overscroll/bounce gesture there, which is the "error
         // sound" this fixes. Capturing keeps the whole drag on this
         // element regardless of where the finger wanders.
-        try { base.setPointerCapture(e.pointerId); } catch (err) {}
+        var captureOk = true;
+        try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
         document.getElementById("canvas").focus();
         activeSource = null;
+        debugLog(tag + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
         // Deliberately not calling update() here -- some touchscreens
         // (confirmed on a Kindle Fire) report a noisy, briefly-inaccurate
         // position for the very first event of a touch, before their
@@ -1715,8 +1774,12 @@
         // for the same class of first-event problem (see setupTurnStick).
       });
       window.addEventListener("pointermove", function (e) {
+        if (pointerId !== null && e.pointerId !== pointerId) {
+          debugLog(tag + " pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
+        }
         if (e.pointerId !== pointerId) return;
         if (activeSource === null) activeSource = "pointer";
+        debugLog(tag + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
         if (activeSource !== "pointer") return;
         update(e.clientX, e.clientY);
       });
@@ -1747,11 +1810,13 @@
         if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
         if (activeSource === null) activeSource = "touch";
+        debugLog(tag + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY) + " touches=" + e.touches.length + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
         if (activeSource !== "touch") return;
         update(e.touches[0].clientX, e.touches[0].clientY);
       }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
+        debugLog(tag + " " + e.type + " id=" + e.pointerId);
         pointerId = null;
         reset();
       }
@@ -1837,8 +1902,10 @@
         startX = e.clientX;
         dragging = false;
         activeSource = null;
-        try { base.setPointerCapture(e.pointerId); } catch (err) {}
+        var captureOk = true;
+        try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
         document.getElementById("canvas").focus();
+        debugLog("turn pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
         // Deliberately not calling updateKnob here -- see the big comment
         // above for why applying anything before the drag threshold is
         // what caused every tap to also turn.
@@ -1851,8 +1918,12 @@
         updateKnob(clientX);
       }
       window.addEventListener("pointermove", function (e) {
+        if (pointerId !== null && e.pointerId !== pointerId) {
+          debugLog("turn pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
+        }
         if (e.pointerId !== pointerId) return;
         if (activeSource === null) activeSource = "pointer";
+        debugLog("turn pointermove x=" + Math.round(e.clientX) + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
         if (activeSource !== "pointer") return;
         handleMove(e.clientX);
       });
@@ -1868,11 +1939,13 @@
         if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
         if (activeSource === null) activeSource = "touch";
+        debugLog("turn touchmove x=" + Math.round(e.touches[0].clientX) + " touches=" + e.touches.length + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
         if (activeSource !== "touch") return;
         handleMove(e.touches[0].clientX);
       }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
+        debugLog("turn " + e.type + " id=" + e.pointerId + " dragging=" + dragging);
         pointerId = null;
         if (dragging) {
           knob.style.transform = "translate(-50%, -50%)";
