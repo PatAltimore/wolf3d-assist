@@ -1778,19 +1778,35 @@
           debugLog(tag + " pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
         }
         if (e.pointerId !== pointerId) return;
+        // Confirmed on a Kindle Fire (via the debug log above): Silk's
+        // pointermove reports clientX/clientY hard-zeroed -- not just
+        // imprecise, literally (0, 0) -- while pointerdown/pointerup on
+        // the very same element report real coordinates fine. Neither
+        // stick is ever drawn at the literal top-left corner of the
+        // screen, so (0, 0) can only be this bug, never a genuine touch
+        // position. Bailing out *before* claiming activeSource is what
+        // matters: earlier this event would win the per-gesture race
+        // just by firing first, permanently locking out the correctly-
+        // working touchmove fallback for the whole gesture even though
+        // its own data was garbage -- that's what "jumps to the left"
+        // actually was. Leaving activeSource unclaimed here lets the
+        // next real touchmove event claim the gesture instead.
+        if (e.clientX === 0 && e.clientY === 0) {
+          debugLog(tag + " pointermove IGNORED zeroed-coords");
+          return;
+        }
         if (activeSource === null) activeSource = "pointer";
         debugLog(tag + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
         if (activeSource !== "pointer") return;
         update(e.clientX, e.clientY);
       });
       // Some Android WebViews (confirmed on a Kindle Fire's Silk browser)
-      // dispatch pointerdown/pointerup for a captured pointer correctly
-      // but pointermove unreliably -- fires for some gestures, not for
-      // others -- so continuous dragging (entirely pointermove-driven)
-      // just silently stopped working on a gesture-by-gesture basis.
-      // touchmove is the older, far more universally-reliable API for
-      // exactly this, so this mirrors the same update() call from it as a
-      // fallback whenever a given gesture's pointermove doesn't show up.
+      // dispatch pointerdown/pointerup for a captured pointer correctly,
+      // but pointermove with clientX/clientY hard-zeroed -- see the
+      // pointermove listener's own comment above. touchmove is the
+      // older, far more universally-reliable API for exactly this, so
+      // this mirrors the same update() call from it as a fallback
+      // whenever pointermove's data for a gesture turns out unusable.
       //
       // Always listening, but activeSource (see above, set fresh on every
       // pointerdown) decides which one actually drives update() for the
@@ -1802,13 +1818,21 @@
       // samples), so with both live the knob visibly jumped to wherever
       // whichever event fired first put it, then jumped again to wherever
       // the other one did. Picking one source per gesture -- whichever
-      // fires first -- avoids that fight while still recovering per
-      // gesture on a device where pointermove isn't consistently there at
-      // all. Not passive, so it can still preventDefault the native
-      // scroll/bounce gesture on browsers relying on this path instead.
+      // fires first *with usable data* -- avoids that fight while still
+      // recovering per gesture on a device where pointermove doesn't
+      // actually work at all. Not passive, so it can still preventDefault
+      // the native scroll/bounce gesture on browsers relying on this
+      // path instead.
       window.addEventListener("touchmove", function (e) {
         if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
+        // Same defensive check as pointermove above, in case this same
+        // zeroing bug ever turns up on the touch side too -- neither
+        // stick is ever at literal (0, 0), so this can only be bad data.
+        if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
+          debugLog(tag + " touchmove IGNORED zeroed-coords");
+          return;
+        }
         if (activeSource === null) activeSource = "touch";
         debugLog(tag + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY) + " touches=" + e.touches.length + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
         if (activeSource !== "touch") return;
@@ -1922,13 +1946,26 @@
           debugLog("turn pointermove IGNORED id-mismatch got=" + e.pointerId + " want=" + pointerId);
         }
         if (e.pointerId !== pointerId) return;
+        // Confirmed via the debug log: Silk's pointermove on a Kindle
+        // Fire reports clientX/clientY hard-zeroed -- this stick is never
+        // drawn at literal x=0, so that can only be this bug, not a real
+        // touch position. See the matching comment in setupStick's own
+        // pointermove listener for the full story -- this was the actual
+        // cause of "the pill jumps left": clamping (0 - centerX) to
+        // maxDist is a hard-left deflection every time, and claiming
+        // activeSource on the way there is what locked out the correctly
+        // -working touchmove fallback for the rest of the gesture.
+        if (e.clientX === 0) {
+          debugLog("turn pointermove IGNORED zeroed-coords");
+          return;
+        }
         if (activeSource === null) activeSource = "pointer";
         debugLog("turn pointermove x=" + Math.round(e.clientX) + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
         if (activeSource !== "pointer") return;
         handleMove(e.clientX);
       });
       // See the touchmove fallback comment in setupStick above -- same
-      // underlying Android gap, needed here too since this stick's whole
+      // underlying Android bug, needed here too since this stick's whole
       // drag-vs-tap distinction (and the turn value itself) is entirely
       // pointermove-driven -- and the same per-gesture activeSource lock,
       // needed here too for the same iPhone jump (confirmed on this stick
@@ -1938,6 +1975,10 @@
       window.addEventListener("touchmove", function (e) {
         if (pointerId === null || !e.touches.length) return;
         e.preventDefault();
+        if (e.touches[0].clientX === 0 && e.touches[0].clientY === 0) {
+          debugLog("turn touchmove IGNORED zeroed-coords");
+          return;
+        }
         if (activeSource === null) activeSource = "touch";
         debugLog("turn touchmove x=" + Math.round(e.touches[0].clientX) + " touches=" + e.touches.length + " dragging=" + dragging + " source=" + activeSource + (activeSource !== "touch" ? " SKIPPED" : ""));
         if (activeSource !== "touch") return;
