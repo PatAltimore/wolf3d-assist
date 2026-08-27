@@ -1412,7 +1412,13 @@
       var t = new Date();
       var stamp = ("0" + t.getMinutes()).slice(-2) + ":" + ("0" + t.getSeconds()).slice(-2) + "." + ("00" + t.getMilliseconds()).slice(-3);
       touchDebugLines.push(stamp + " " + msg);
-      if (touchDebugLines.length > 40) touchDebugLines.shift();
+      // 40 was too tight in practice -- a single real drag emits a
+      // pointermove/touchmove pair per frame and can fill it before the
+      // gesture even ends, pushing the pointerdown line (capture=, real
+      // origin x/y) out before it's been read. 300 comfortably covers a
+      // multi-second drag on both sticks; Copy/Email make a long log a
+      // non-issue to get off the device now.
+      if (touchDebugLines.length > 300) touchDebugLines.shift();
       touchDebugLogEl.textContent = touchDebugLines.join("\n");
       touchDebugEl.scrollTop = touchDebugEl.scrollHeight;
     }
