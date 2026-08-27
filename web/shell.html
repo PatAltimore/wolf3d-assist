@@ -1751,6 +1751,37 @@
     // deadzone check, and the knob's own translate all already reduce to
     // pure horizontal motion once dy is always 0, with no separate math
     // path required.
+    // Shared across both sticks (a two-finger move+turn drag is a real
+    // gesture, not an edge case) -- counts active stick drags so page
+    // scroll is only re-enabled once *none* of them are still down.
+    //
+    // Exists because setPointerCapture failing is a real, observed
+    // condition on real hardware, not just a hypothetical -- a Kindle
+    // Fire's debug log showed "capture=false" for every pointerdown on
+    // both sticks. Per the comment on the capture attempt below, losing
+    // capture means a drag that wanders outside the stick's own ~160px
+    // circle (easy to do -- maxDist here is only 55/36px, well inside a
+    // real thumb's actual travel) hands the gesture to whatever's
+    // physically under the finger next, which lacks touch-action:none,
+    // so the browser's native scroll/pan can compete for it. That
+    // matches a real bug report exactly: "only down and right work" is
+    // what native scroll winning for some directions but not others
+    // looks like (whichever directions have page-scroll room to actually
+    // move get intercepted; directions already at a scroll boundary have
+    // nowhere to go, so they pass through to us untouched) -- not a
+    // uniform freeze, which a lost gesture with no competing scroll would
+    // look like instead. Disabling touch-action on body/html for the
+    // duration of any stick drag makes this impossible regardless of
+    // where the finger ends up, without depending on setPointerCapture
+    // working at all.
+    var activeStickDrags = 0;
+    function lockPageScroll(lock) {
+      activeStickDrags += lock ? 1 : -1;
+      var disable = activeStickDrags > 0;
+      document.documentElement.style.touchAction = disable ? "none" : "";
+      document.body.style.touchAction = disable ? "none" : "";
+    }
+
     function setupStick(baseId, knobId, maxDist, deadzone, onMove, onStart, onEnd, xOnly) {
       var base = document.getElementById(baseId);
       var knob = document.getElementById(knobId);
@@ -1799,6 +1830,9 @@
         // element regardless of where the finger wanders.
         var captureOk = true;
         try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
+        // Belt-and-suspenders for exactly the case captureOk=false means
+        // capture isn't actually helping -- see lockPageScroll above.
+        lockPageScroll(true);
         document.getElementById("canvas").focus();
         activeSource = null;
         debugLog(baseId + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
@@ -1856,6 +1890,7 @@
         if (e.pointerId !== pointerId) return;
         debugLog(baseId + " " + e.type + " id=" + e.pointerId);
         pointerId = null;
+        lockPageScroll(false);
         reset();
         if (onEnd) onEnd();
       }
