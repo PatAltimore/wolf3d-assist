@@ -1871,6 +1871,26 @@
       var base = document.getElementById(baseId);
       var knob = document.getElementById(knobId);
       var pointerId = null;
+      // Which physical touch (Touch.identifier, captured at touchstart)
+      // belongs to *this* stick's own gesture. Exists because the
+      // touchmove/touchend/touchcancel fallback listeners below are on
+      // window, not base -- window-level touch events fire for every
+      // finger on the page, and e.touches/e.changedTouches lists every
+      // touch simultaneously active anywhere, not just this stick's own.
+      // Confirmed on a Kindle Fire: with two sticks held down together
+      // (a normal move+turn gesture), the earlier version of this code
+      // blindly read e.touches[0] -- whichever finger happens to sort
+      // first in that shared list, not necessarily this stick's -- so
+      // one stick's listener could end up driving its knob from the
+      // *other* stick's finger. That's what "the right stick also moves
+      // the left stick in unison" was. It also explains the occasional
+      // solo-drag jump: if a gesture's own pointerup/pointercancel ever
+      // fails to fire (plausible on a device already proven to drop/
+      // corrupt pointer events several other ways), that stick's
+      // touchmove listener stays "active" (pointerId still non-null)
+      // indefinitely, ready to hijack the next unrelated finger it sees
+      // as touches[0].
+      var touchId = null;
       var originX = 0, originY = 0;
       // False until origin{X,Y} hold a real coordinate -- see the
       // zeroed-pointerdown handling below for why this can't just be
@@ -1909,6 +1929,10 @@
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
+        // Cleared here (not just left for touchstart to overwrite) so a
+        // stale identifier from a gesture whose own end events all
+        // somehow got missed can't briefly leak into this new one.
+        touchId = null;
         // Without this, dragging past the stick's own edges hands the
         // gesture to whatever element is physically under the finger next,
         // which lacks touch-action:none -- the browser then tries its
@@ -1948,6 +1972,14 @@
         originSet = true;
         update(e.clientX, e.clientY); // dx=dy=0 by construction -- this touch's start point *is* the origin
       });
+      // On base (not window), so this only ever fires for a touch that
+      // actually started on this stick -- exactly what the touchmove/
+      // touchend/touchcancel fallbacks below need to tell this gesture's
+      // own finger apart from any other touch active elsewhere on the
+      // page at the same time. See touchId's own comment above.
+      base.addEventListener("touchstart", function (e) {
+        if (e.changedTouches.length) touchId = e.changedTouches[0].identifier;
+      }, { passive: true });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
         // Confirmed on a Kindle Fire (via the debug overlay): Silk's
@@ -1993,28 +2025,67 @@
       // from a Kindle Fire's zeroed pointermove frames. Not passive, so
       // it can preventDefault the native scroll/bounce gesture on a
       // device actually relying on this path.
+      // Finds *this* gesture's own touch within a page-wide touch list --
+      // see touchId's comment above for why e.touches[0] can't be trusted
+      // once two sticks (or a leaked stale gesture) are in play.
+      function findOwnTouch(touchList) {
+        if (touchId === null) return null;
+        for (var i = 0; i < touchList.length; i++) {
+          if (touchList[i].identifier === touchId) return touchList[i];
+        }
+        return null;
+      }
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || !e.touches.length) return;
+        if (pointerId === null) return;
+        var touch = findOwnTouch(e.touches);
+        if (!touch) return;
         if (activeSource === null) activeSource = "touch";
         if (activeSource !== "touch") return;
         e.preventDefault();
         // See the zeroed-pointerdown handling in the pointerdown listener
         // above -- this gesture may still be waiting on its first real
         // coordinate.
-        if (!originSet) { originX = e.touches[0].clientX; originY = e.touches[0].clientY; originSet = true; }
-        debugLog(baseId + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY));
-        update(e.touches[0].clientX, e.touches[0].clientY);
+        if (!originSet) { originX = touch.clientX; originY = touch.clientY; originSet = true; }
+        debugLog(baseId + " touchmove x=" + Math.round(touch.clientX) + " y=" + Math.round(touch.clientY));
+        update(touch.clientX, touch.clientY);
       }, { passive: false });
-      function endDrag(e) {
-        if (e.pointerId !== pointerId) return;
-        debugLog(baseId + " " + e.type + " id=" + e.pointerId);
+      function endDrag() {
         pointerId = null;
+        touchId = null;
         lockPageScroll(false);
         reset();
         if (onEnd) onEnd();
       }
-      window.addEventListener("pointerup", endDrag);
-      window.addEventListener("pointercancel", endDrag);
+      window.addEventListener("pointerup", function (e) {
+        if (e.pointerId !== pointerId) return;
+        debugLog(baseId + " pointerup id=" + e.pointerId);
+        endDrag();
+      });
+      window.addEventListener("pointercancel", function (e) {
+        if (e.pointerId !== pointerId) return;
+        debugLog(baseId + " pointercancel id=" + e.pointerId);
+        endDrag();
+      });
+      // Safety net alongside pointerup/pointercancel above, not a
+      // replacement for them -- if either of those ever fails to fire
+      // (this device has already shown its pointer events are unreliable
+      // in several other ways), pointerId/touchId would otherwise stay
+      // stuck non-null forever, leaving this stick's touchmove listener
+      // "active" and ready to hijack whatever unrelated finger touches
+      // the page next. Both listeners null out the same state on
+      // whichever fires first; the other then finds nothing to match
+      // (touchId/pointerId already null) and is a no-op, so a normal lift
+      // that fires both as usual doesn't double-reset anything.
+      window.addEventListener("touchend", function (e) {
+        if (!findOwnTouch(e.changedTouches)) return;
+        debugLog(baseId + " touchend id=" + touchId);
+        endDrag();
+      });
+      window.addEventListener("touchcancel", function (e) {
+        if (!findOwnTouch(e.changedTouches)) return;
+        debugLog(baseId + " touchcancel id=" + touchId);
+        endDrag();
+      });
     }
 
     // Left stick: move + strafe, feeding assist_set_move (wl_game.cpp),
@@ -2070,6 +2141,13 @@
       var el = document.getElementById("tc-turn-joystick");
       var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
       var pointerId = null, startX = 0;
+      // Same touch-identifier tracking as setupStick's own touchId, and
+      // for the same reason -- this is a wholly separate closure with its
+      // own window-level touchmove listener on the same element, so it
+      // needs its own way to tell this gesture's finger apart from
+      // whatever else is touching the page (see setupStick's touchId
+      // comment for the full "right stick moved the left stick" story).
+      var touchId = null;
       // False until startX holds a real coordinate -- see the
       // zeroed-pointerdown handling below.
       var startXSet = false;
@@ -2085,6 +2163,9 @@
 
       el.addEventListener("pointerdown", function (e) {
         pointerId = e.pointerId;
+        // Cleared here for the same reason as setupStick's own -- see
+        // its comment.
+        touchId = null;
         activeSource = null;
         turnStickDragged = false;
         // Confirmed on a Kindle Fire: pointerdown itself can report the
@@ -2099,6 +2180,16 @@
         startX = e.clientX;
         startXSet = true;
       });
+      el.addEventListener("touchstart", function (e) {
+        if (e.changedTouches.length) touchId = e.changedTouches[0].identifier;
+      }, { passive: true });
+      function findOwnTouch(touchList) {
+        if (touchId === null) return null;
+        for (var i = 0; i < touchList.length; i++) {
+          if (touchList[i].identifier === touchId) return touchList[i];
+        }
+        return null;
+      }
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
         // See setupStick's pointermove listener for the full story on
@@ -2122,17 +2213,39 @@
       // not simply absent) nor unconditionally live alongside pointermove
       // (iOS fires both, out of step with each other).
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || !e.touches.length) return;
+        if (pointerId === null) return;
+        var touch = findOwnTouch(e.touches);
+        if (!touch) return;
         if (activeSource === null) activeSource = "touch";
         if (activeSource !== "touch") return;
-        if (!startXSet) { startX = e.touches[0].clientX; startXSet = true; }
-        var dx = e.touches[0].clientX - startX;
+        if (!startXSet) { startX = touch.clientX; startXSet = true; }
+        var dx = touch.clientX - startX;
         if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
+      function endTap() {
+        pointerId = null;
+        touchId = null;
+        if (!turnStickDragged) tap("Control");
+      }
       window.addEventListener("pointerup", function (e) {
         if (e.pointerId !== pointerId) return;
+        endTap();
+      });
+      // Safety net alongside pointerup above -- see setupStick's own
+      // touchend/touchcancel listeners for why a stuck pointerId here is
+      // a real risk on this device, not just a hypothetical. A stuck
+      // pointerId would otherwise leave this tap-vs-drag tracker "active"
+      // indefinitely, ready to misread the next unrelated touch's
+      // horizontal movement as this gesture's own.
+      window.addEventListener("touchend", function (e) {
+        if (!findOwnTouch(e.changedTouches)) return;
+        endTap();
+      });
+      window.addEventListener("touchcancel", function (e) {
+        if (!findOwnTouch(e.changedTouches)) return;
+        // A cancelled touch is not a completed tap.
         pointerId = null;
-        if (!turnStickDragged) tap("Control");
+        touchId = null;
       });
     })();
 
