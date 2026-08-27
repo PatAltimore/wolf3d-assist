@@ -1713,21 +1713,23 @@
     // push moves/turns slowly and a full push moves at full speed, like
     // an actual stick.
     //
-    // Ported from doom-assist's implementation after real-device testing:
-    // wolf3d-assist had grown an entire touchmove-fallback/source-locking
-    // layer here (a Kindle Fire seemed to need it -- pointermove looked
-    // absent, then flaky, then hard-zeroed, each diagnosis chasing the
-    // last one's leftover symptom) that doom-assist's touch sticks never
-    // had at all, and confirmed working fine on the exact same Kindle and
-    // an iPhone regardless. That's strong evidence the touchmove layer
-    // was solving a problem of its own making rather than a real gap in
-    // Pointer Events support -- plausibly the touchmove listeners'
-    // preventDefault() itself interfering with however Silk's Pointer
-    // Events are implemented underneath, though this file has no way to
-    // confirm that theory further. Reverting to plain pointerdown/
-    // pointermove/pointerup, matching doom-assist exactly, is the
-    // higher-confidence move over layering a fifth fix onto a diagnosis
-    // chain that kept being wrong.
+    // Origin-relative measurement below was ported from doom-assist's
+    // implementation, which briefly replaced this whole function wholesale
+    // (including dropping the touchmove fallback and per-gesture source
+    // tracking) on the theory that the touchmove layer was solving a
+    // problem of its own making -- a real-device test on the Kindle Fire
+    // this was built for seemed to confirm plain pointerdown/pointermove/
+    // pointerup worked fine without it. It didn't: the same device later
+    // reproduced the exact hard-zeroed-pointermove symptom the fallback
+    // was built for (a debug-overlay trace showed pointermove stuck at
+    // clientX=clientY=0 from page load, only reporting real coordinates
+    // after a death/respawn -- pausing alone doesn't do it, so it isn't
+    // simply "wait long enough"; nothing here identifies what in that
+    // path actually flips it). The passing test just happened to run past
+    // that point already. So the touchmove fallback and per-gesture
+    // activeSource tracking are back, layered onto this version's real
+    // improvement below (origin-relative measurement) instead of the
+    // fixed-center measurement they originally shipped alongside.
     //
     // Movement is measured from wherever THIS touch first landed
     // (originX/Y, captured on pointerdown), not from the base element's
@@ -1754,11 +1756,16 @@
       var knob = document.getElementById(knobId);
       var pointerId = null;
       var originX = 0, originY = 0;
-      // Set true the first time a real pointermove ever fires for this
-      // stick, and never reset -- see the touchmove fallback below for
-      // why this needs to be a permanent, whole-session decision rather
-      // than reset per gesture.
-      var sawPointerMove = false;
+      // Which event type is driving the *current* gesture -- "pointer" or
+      // "touch" -- reset to null on every pointerdown. Confirmed on a
+      // Kindle Fire (see the pointermove listener below): this can't be a
+      // permanent whole-session latch like an earlier version tried,
+      // because pointermove there isn't simply absent, it's unreliable --
+      // real coordinates one frame, hard-zeroed the next, within the same
+      // gesture. A permanent latch meant the one gesture where pointermove
+      // happened to fire (even with garbage data) permanently disabled the
+      // working touchmove fallback for the rest of the session.
+      var activeSource = null;
 
       function update(clientX, clientY) {
         var dx = clientX - originX;
@@ -1793,39 +1800,54 @@
         var captureOk = true;
         try { base.setPointerCapture(e.pointerId); } catch (err) { captureOk = false; }
         document.getElementById("canvas").focus();
+        activeSource = null;
         debugLog(baseId + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
         if (onStart) onStart();
         update(e.clientX, e.clientY); // dx=dy=0 by construction -- this touch's start point *is* the origin
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
-        sawPointerMove = true;
-        debugLog(baseId + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY));
+        // Confirmed on a Kindle Fire (via the debug overlay): Silk's
+        // pointermove reports clientX/clientY hard-zeroed -- not just
+        // imprecise, literally (0, 0) -- for a stretch after the page
+        // loads (seen lasting through several drags), then switches to
+        // real coordinates later in the session (observed right after a
+        // death/respawn, though what in that path actually flips it is
+        // still unconfirmed -- pausing alone does not). Neither stick is
+        // ever drawn at the literal top-left corner of the screen, so
+        // (0, 0) can only be this bug, never a genuine touch position.
+        // Releasing activeSource here (rather than just discarding this
+        // one event) is what lets touchmove step in for this specific
+        // frame instead of the frame's real data being thrown away too
+        // just because pointer already won the gesture.
+        if (e.clientX === 0 && e.clientY === 0) {
+          if (activeSource === "pointer") activeSource = null;
+          debugLog(baseId + " pointermove IGNORED zeroed-coords");
+          return;
+        }
+        if (activeSource === null) activeSource = "pointer";
+        debugLog(baseId + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
+        if (activeSource !== "pointer") return;
         update(e.clientX, e.clientY);
       });
-      // Confirmed on a Kindle Fire: Silk's pointermove never fires at all
-      // for a captured pointer -- pointerdown/pointerup work fine (tap-
-      // to-fire on the turn stick still worked), but a real drag left
-      // both sticks stuck dead center, since dragging is entirely
-      // pointermove-driven with no fallback. touchmove is the older, far
-      // more universally-supported API for exactly this.
-      //
-      // Gated by sawPointerMove, and *not* reset per gesture: confirmed
-      // on an iPhone, pointermove works perfectly there on its own, and
-      // this project has already been burned once by an earlier fallback
-      // attempt that let touchmove fire alongside a working pointermove
-      // -- the two don't stay perfectly in step (iOS appears to coalesce/
-      // smooth pointer samples differently than raw touch samples), so
-      // with both live the knob visibly jumped between wherever each one
-      // put it. Latching this permanently the first time pointermove
-      // proves itself avoids that fight entirely: once it fires even
-      // once, this listener never touches update() again for the rest of
-      // the session, on either stick, matching doom-assist's touchmove
-      // -free behavior exactly from that point on. Not passive, so it
-      // can preventDefault the native scroll/bounce gesture on a device
-      // relying on this path instead.
+      // touchmove fallback for whenever this gesture's pointermove data
+      // turns out unusable (hard-zeroed, see above) -- always listening,
+      // but activeSource (reset fresh on every pointerdown) decides which
+      // one actually drives update() so the two don't fight. Confirmed on
+      // an iPhone: letting both drive it unconditionally doesn't work --
+      // touchmove and pointermove fire for the same physical movement but
+      // aren't perfectly in step there (iOS appears to coalesce/smooth
+      // pointer samples differently than raw touch samples), so with both
+      // live the knob visibly jumped to wherever whichever one fired
+      // first put it. Picking one source per gesture -- whichever proves
+      // itself usable first -- avoids that fight while still recovering
+      // from a Kindle Fire's zeroed pointermove frames. Not passive, so
+      // it can preventDefault the native scroll/bounce gesture on a
+      // device actually relying on this path.
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        if (pointerId === null || !e.touches.length) return;
+        if (activeSource === null) activeSource = "touch";
+        if (activeSource !== "touch") return;
         e.preventDefault();
         debugLog(baseId + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY));
         update(e.touches[0].clientX, e.touches[0].clientY);
@@ -1894,37 +1916,47 @@
       var el = document.getElementById("tc-turn-joystick");
       var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
       var pointerId = null, startX = 0;
-      // Same permanent latch as setupStick's own touchmove fallback, and
-      // for the same reason: this tap-vs-drag distinction is its own
-      // independent pointermove listener (separate from setupStick's),
-      // so it needs its own fallback and its own latch, gated the exact
-      // same way to stay invisible on a device (an iPhone) where
-      // pointermove already works.
-      var sawPointerMove = false;
+      // Same per-gesture source tracking as setupStick's own touchmove
+      // fallback, and for the same reason: this tap-vs-drag distinction is
+      // its own independent pointermove listener (separate from
+      // setupStick's), so it needs its own fallback -- and a hard-zeroed
+      // pointermove here is actually worse than in setupStick, since
+      // dx = 0 - startX reads as a huge drag on the very first bad frame,
+      // misfiring "drag" instead of just misreading distance, so a tap
+      // would never fire at all during the zeroed-coordinate window.
+      var activeSource = null;
 
       el.addEventListener("pointerdown", function (e) {
         pointerId = e.pointerId;
         startX = e.clientX;
+        activeSource = null;
         turnStickDragged = false;
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
-        sawPointerMove = true;
+        // See setupStick's pointermove listener for the full story on
+        // Silk's hard-zeroed pointermove bug -- same rejection here.
+        if (e.clientX === 0 && e.clientY === 0) {
+          if (activeSource === "pointer") activeSource = null;
+          return;
+        }
+        if (activeSource === null) activeSource = "pointer";
+        if (activeSource !== "pointer") return;
         // Horizontal distance only, matching setupStick's own xOnly turn
         // this control uses -- a finger drifting vertically on the pill
         // doesn't turn anything, so it shouldn't cancel the tap either.
         var dx = e.clientX - startX;
         if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
-      // Confirmed on a Kindle Fire: without this, turnStickDragged can
-      // never become true there at all (its only source is the
-      // pointermove listener above, and pointermove never fires on that
-      // device), so a real drag always read as a tap and fired instead
-      // of turning -- see setupStick's own touchmove fallback for the
-      // full story and why this is a permanent latch, not reset per
-      // gesture.
+      // touchmove fallback, keyed to the same per-gesture activeSource as
+      // setupStick's -- see its comment for why this can't be a permanent
+      // latch (Silk's pointermove is unreliable within a single gesture,
+      // not simply absent) nor unconditionally live alongside pointermove
+      // (iOS fires both, out of step with each other).
       window.addEventListener("touchmove", function (e) {
-        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        if (pointerId === null || !e.touches.length) return;
+        if (activeSource === null) activeSource = "touch";
+        if (activeSource !== "touch") return;
         var dx = e.touches[0].clientX - startX;
         if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
