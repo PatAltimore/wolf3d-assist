@@ -1754,6 +1754,11 @@
       var knob = document.getElementById(knobId);
       var pointerId = null;
       var originX = 0, originY = 0;
+      // Set true the first time a real pointermove ever fires for this
+      // stick, and never reset -- see the touchmove fallback below for
+      // why this needs to be a permanent, whole-session decision rather
+      // than reset per gesture.
+      var sawPointerMove = false;
 
       function update(clientX, clientY) {
         var dx = clientX - originX;
@@ -1794,9 +1799,37 @@
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
+        sawPointerMove = true;
         debugLog(baseId + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY));
         update(e.clientX, e.clientY);
       });
+      // Confirmed on a Kindle Fire: Silk's pointermove never fires at all
+      // for a captured pointer -- pointerdown/pointerup work fine (tap-
+      // to-fire on the turn stick still worked), but a real drag left
+      // both sticks stuck dead center, since dragging is entirely
+      // pointermove-driven with no fallback. touchmove is the older, far
+      // more universally-supported API for exactly this.
+      //
+      // Gated by sawPointerMove, and *not* reset per gesture: confirmed
+      // on an iPhone, pointermove works perfectly there on its own, and
+      // this project has already been burned once by an earlier fallback
+      // attempt that let touchmove fire alongside a working pointermove
+      // -- the two don't stay perfectly in step (iOS appears to coalesce/
+      // smooth pointer samples differently than raw touch samples), so
+      // with both live the knob visibly jumped between wherever each one
+      // put it. Latching this permanently the first time pointermove
+      // proves itself avoids that fight entirely: once it fires even
+      // once, this listener never touches update() again for the rest of
+      // the session, on either stick, matching doom-assist's touchmove
+      // -free behavior exactly from that point on. Not passive, so it
+      // can preventDefault the native scroll/bounce gesture on a device
+      // relying on this path instead.
+      window.addEventListener("touchmove", function (e) {
+        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        e.preventDefault();
+        debugLog(baseId + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY));
+        update(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: false });
       function endDrag(e) {
         if (e.pointerId !== pointerId) return;
         debugLog(baseId + " " + e.type + " id=" + e.pointerId);
@@ -1861,6 +1894,13 @@
       var el = document.getElementById("tc-turn-joystick");
       var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
       var pointerId = null, startX = 0;
+      // Same permanent latch as setupStick's own touchmove fallback, and
+      // for the same reason: this tap-vs-drag distinction is its own
+      // independent pointermove listener (separate from setupStick's),
+      // so it needs its own fallback and its own latch, gated the exact
+      // same way to stay invisible on a device (an iPhone) where
+      // pointermove already works.
+      var sawPointerMove = false;
 
       el.addEventListener("pointerdown", function (e) {
         pointerId = e.pointerId;
@@ -1869,10 +1909,23 @@
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
+        sawPointerMove = true;
         // Horizontal distance only, matching setupStick's own xOnly turn
         // this control uses -- a finger drifting vertically on the pill
         // doesn't turn anything, so it shouldn't cancel the tap either.
         var dx = e.clientX - startX;
+        if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
+      });
+      // Confirmed on a Kindle Fire: without this, turnStickDragged can
+      // never become true there at all (its only source is the
+      // pointermove listener above, and pointermove never fires on that
+      // device), so a real drag always read as a tap and fired instead
+      // of turning -- see setupStick's own touchmove fallback for the
+      // full story and why this is a permanent latch, not reset per
+      // gesture.
+      window.addEventListener("touchmove", function (e) {
+        if (pointerId === null || sawPointerMove || !e.touches.length) return;
+        var dx = e.touches[0].clientX - startX;
         if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
       window.addEventListener("pointerup", function (e) {
