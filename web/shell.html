@@ -660,6 +660,30 @@
       line-height: 1.4;
       padding: 6px 8px;
       z-index: 1000;
+    }
+    /* Sticky so Copy/Email stay reachable without scrolling back up
+       through a long log during an active drag. */
+    #touch-debug-actions {
+      position: sticky;
+      top: 0;
+      display: flex;
+      gap: 8px;
+      padding-bottom: 6px;
+      background: inherit;
+    }
+    #touch-debug-actions button {
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      background: #1a1a1a;
+      color: #7fff7f;
+      border: 1px solid #7fff7f;
+      border-radius: 3px;
+    }
+    #touch-debug-log {
+      margin: 0;
+      font: inherit;
+      color: inherit;
       white-space: pre-wrap;
       word-break: break-all;
     }
@@ -872,8 +896,24 @@
        read directly off the screen instead of guessed at. Earned its
        keep tracking down a real Kindle Fire bug (pointermove reporting
        hard-zeroed coordinates) that several rounds of guessing at
-       "pointermove is absent/flaky" never would have found. -->
-  <div id="touch-debug" hidden></div>
+       "pointermove is absent/flaky" never would have found.
+
+       The Copy/Email buttons exist because getting this log off the
+       device and into a chat with Claude turned out to be its own
+       obstacle -- typing out a dozen timestamped lines by hand from a
+       small screen is real friction. Copy uses the Clipboard API (falls
+       back to a hidden-textarea + execCommand for a WebView that lacks
+       it); Email opens the device's own mail app pre-addressed to the
+       user's own inbox with the log already in the body, so reading it
+       back on another device is just opening that email -- nothing here
+       sends the log anywhere on its own. -->
+  <div id="touch-debug" hidden>
+    <div id="touch-debug-actions">
+      <button type="button" id="touch-debug-copy">Copy log</button>
+      <button type="button" id="touch-debug-email">Email log</button>
+    </div>
+    <pre id="touch-debug-log"></pre>
+  </div>
 
   <script>
     // ================================================================
@@ -1364,6 +1404,7 @@
     // long drag can't grow the panel without bound.
     var DEBUG_TOUCH = /[?&]debug=1\b/.test(location.search);
     var touchDebugEl = document.getElementById("touch-debug");
+    var touchDebugLogEl = document.getElementById("touch-debug-log");
     var touchDebugLines = [];
     if (DEBUG_TOUCH) touchDebugEl.hidden = false;
     function debugLog(msg) {
@@ -1372,8 +1413,48 @@
       var stamp = ("0" + t.getMinutes()).slice(-2) + ":" + ("0" + t.getSeconds()).slice(-2) + "." + ("00" + t.getMilliseconds()).slice(-3);
       touchDebugLines.push(stamp + " " + msg);
       if (touchDebugLines.length > 40) touchDebugLines.shift();
-      touchDebugEl.textContent = touchDebugLines.join("\n");
+      touchDebugLogEl.textContent = touchDebugLines.join("\n");
       touchDebugEl.scrollTop = touchDebugEl.scrollHeight;
+    }
+
+    // Getting this log off the device and into a chat with Claude is its
+    // own obstacle -- typing out a dozen timestamped lines by hand from a
+    // small screen is real friction, worth a couple of one-tap buttons.
+    if (DEBUG_TOUCH) {
+      document.getElementById("touch-debug-copy").addEventListener("click", function () {
+        var text = touchDebugLines.join("\n");
+        function fallbackCopy() {
+          // Clipboard API needs a secure context and isn't universal on
+          // an older WebView -- a hidden, selected textarea + the legacy
+          // execCommand still works pretty much everywhere.
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          var ok = false;
+          try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+          document.body.removeChild(ta);
+          toast(ok ? "Log copied" : "Copy failed");
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { toast("Log copied"); }, fallbackCopy);
+        } else {
+          fallbackCopy();
+        }
+      });
+      document.getElementById("touch-debug-email").addEventListener("click", function () {
+        // Addressed to the user's own inbox -- this opens their own mail
+        // app with a draft they still have to hit send on, it doesn't
+        // transmit anything itself. Reading the email back from wherever
+        // they're chatting with Claude is then just a copy/paste, not a
+        // manual transcription off a small screen.
+        var subject = encodeURIComponent("Wolf3D touch debug log");
+        var body = encodeURIComponent(touchDebugLines.join("\n"));
+        window.location.href = "mailto:paltimore@hotmail.com?subject=" + subject + "&body=" + body;
+      });
     }
 
     // ---- 4. Input bridge, part 1: faking keyboard events ----
