@@ -1850,17 +1850,15 @@
     // circle (easy to do -- maxDist here is only 55/36px, well inside a
     // real thumb's actual travel) hands the gesture to whatever's
     // physically under the finger next, which lacks touch-action:none,
-    // so the browser's native scroll/pan can compete for it. That
-    // matches a real bug report exactly: "only down and right work" is
-    // what native scroll winning for some directions but not others
-    // looks like (whichever directions have page-scroll room to actually
-    // move get intercepted; directions already at a scroll boundary have
-    // nowhere to go, so they pass through to us untouched) -- not a
-    // uniform freeze, which a lost gesture with no competing scroll would
-    // look like instead. Disabling touch-action on body/html for the
-    // duration of any stick drag makes this impossible regardless of
-    // where the finger ends up, without depending on setPointerCapture
-    // working at all.
+    // so the browser's native scroll/pan can compete for it. Disabling
+    // touch-action on body/html for the duration of any stick drag makes
+    // that impossible regardless of where the finger ends up, without
+    // depending on setPointerCapture working at all -- a real
+    // improvement on its own, even though it turned out *not* to be what
+    // "only down and right work" actually was (that one was a zeroed
+    // pointerdown origin -- see setupStick's pointerdown handler -- a
+    // clean touchmove trace correctly tracking a leftward drag that the
+    // engine still only read as rightward is what ruled this theory out).
     var activeStickDrags = 0;
     function lockPageScroll(lock) {
       activeStickDrags += lock ? 1 : -1;
@@ -1874,6 +1872,10 @@
       var knob = document.getElementById(knobId);
       var pointerId = null;
       var originX = 0, originY = 0;
+      // False until origin{X,Y} hold a real coordinate -- see the
+      // zeroed-pointerdown handling below for why this can't just be
+      // "set on pointerdown" the way it reads.
+      var originSet = false;
       // Which event type is driving the *current* gesture -- "pointer" or
       // "touch" -- reset to null on every pointerdown. Confirmed on a
       // Kindle Fire (see the pointermove listener below): this can't be a
@@ -1907,8 +1909,6 @@
       base.addEventListener("pointerdown", function (e) {
         e.preventDefault();
         pointerId = e.pointerId;
-        originX = e.clientX;
-        originY = e.clientY;
         // Without this, dragging past the stick's own edges hands the
         // gesture to whatever element is physically under the finger next,
         // which lacks touch-action:none -- the browser then tries its
@@ -1924,6 +1924,28 @@
         activeSource = null;
         debugLog(baseId + " pointerdown id=" + e.pointerId + " type=" + e.pointerType + " x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " capture=" + captureOk);
         if (onStart) onStart();
+        // Confirmed on a Kindle Fire: pointerdown is a PointerEvent same
+        // as pointermove, and reports the identical hard-zeroed-coords
+        // bug -- not just occasionally imprecise, literally (0, 0).
+        // Trusting that as the origin made every later dx/dy compute as
+        // realCoord - 0, i.e. always positive, which reads as "always
+        // right, always backward" regardless of which way the finger
+        // actually moves -- a real bug report matching this exactly,
+        // confirmed against a clean touchmove trace showing correct
+        // tracking that the engine still didn't follow. Leaving
+        // originSet false here defers picking an origin to the first
+        // *real* coordinate this gesture reports, from whichever of
+        // pointermove/touchmove proves usable first (see those listeners
+        // below) -- same "dx=dy=0 by construction" treatment as a good
+        // pointerdown gets, just one event later.
+        if (e.clientX === 0 && e.clientY === 0) {
+          originSet = false;
+          debugLog(baseId + " pointerdown IGNORED zeroed-coords (origin deferred)");
+          return;
+        }
+        originX = e.clientX;
+        originY = e.clientY;
+        originSet = true;
         update(e.clientX, e.clientY); // dx=dy=0 by construction -- this touch's start point *is* the origin
       });
       window.addEventListener("pointermove", function (e) {
@@ -1946,6 +1968,12 @@
           debugLog(baseId + " pointermove IGNORED zeroed-coords");
           return;
         }
+        // See the zeroed-pointerdown handling above -- this gesture may
+        // never have gotten a real origin yet. Treating this event's own
+        // coordinates as the origin (dx=dy=0 for this one frame) is the
+        // same fallback pointerdown itself would have used had *it* been
+        // the one to report real coordinates.
+        if (!originSet) { originX = e.clientX; originY = e.clientY; originSet = true; }
         if (activeSource === null) activeSource = "pointer";
         debugLog(baseId + " pointermove x=" + Math.round(e.clientX) + " y=" + Math.round(e.clientY) + " source=" + activeSource + (activeSource !== "pointer" ? " SKIPPED" : ""));
         if (activeSource !== "pointer") return;
@@ -1970,6 +1998,10 @@
         if (activeSource === null) activeSource = "touch";
         if (activeSource !== "touch") return;
         e.preventDefault();
+        // See the zeroed-pointerdown handling in the pointerdown listener
+        // above -- this gesture may still be waiting on its first real
+        // coordinate.
+        if (!originSet) { originX = e.touches[0].clientX; originY = e.touches[0].clientY; originSet = true; }
         debugLog(baseId + " touchmove x=" + Math.round(e.touches[0].clientX) + " y=" + Math.round(e.touches[0].clientY));
         update(e.touches[0].clientX, e.touches[0].clientY);
       }, { passive: false });
@@ -2038,6 +2070,9 @@
       var el = document.getElementById("tc-turn-joystick");
       var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
       var pointerId = null, startX = 0;
+      // False until startX holds a real coordinate -- see the
+      // zeroed-pointerdown handling below.
+      var startXSet = false;
       // Same per-gesture source tracking as setupStick's own touchmove
       // fallback, and for the same reason: this tap-vs-drag distinction is
       // its own independent pointermove listener (separate from
@@ -2050,9 +2085,19 @@
 
       el.addEventListener("pointerdown", function (e) {
         pointerId = e.pointerId;
-        startX = e.clientX;
         activeSource = null;
         turnStickDragged = false;
+        // Confirmed on a Kindle Fire: pointerdown itself can report the
+        // same hard-zeroed coordinates as pointermove -- see setupStick's
+        // pointerdown handler for the full story. Trusting a zeroed
+        // startX here made dx = realX - 0 always read as a huge
+        // rightward drag from frame one, which (independent of
+        // setupStick's own origin bug) would also explain a tap
+        // misfiring as "dragged" every time. Deferring to the first real
+        // coordinate instead, same as setupStick does.
+        if (e.clientX === 0 && e.clientY === 0) { startXSet = false; return; }
+        startX = e.clientX;
+        startXSet = true;
       });
       window.addEventListener("pointermove", function (e) {
         if (e.pointerId !== pointerId) return;
@@ -2062,6 +2107,7 @@
           if (activeSource === "pointer") activeSource = null;
           return;
         }
+        if (!startXSet) { startX = e.clientX; startXSet = true; }
         if (activeSource === null) activeSource = "pointer";
         if (activeSource !== "pointer") return;
         // Horizontal distance only, matching setupStick's own xOnly turn
@@ -2079,6 +2125,7 @@
         if (pointerId === null || !e.touches.length) return;
         if (activeSource === null) activeSource = "touch";
         if (activeSource !== "touch") return;
+        if (!startXSet) { startX = e.touches[0].clientX; startXSet = true; }
         var dx = e.touches[0].clientX - startX;
         if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
       });
