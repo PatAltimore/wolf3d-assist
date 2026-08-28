@@ -132,11 +132,23 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
             // Outside the `if (seen)` block on purpose -- see
             // ASSIST_TILE_EXIT's own comment above. tilemap holds the raw
             // wall-plane tile id for every cell regardless of fog-of-war,
-            // the same array wl_agent.cpp's own elevator-use check reads
-            // (ELEVATORTILE/ALTELEVATORTILE, wl_def.h), so this is exactly
-            // the exit switch's location whether or not the player has
-            // ever been anywhere near it.
-            if (tilemap[x][y] == ELEVATORTILE || tilemap[x][y] == ALTELEVATORTILE)
+            // the same array wl_agent.cpp's own elevator-use check reads,
+            // so this is exactly the exit switch's location whether or
+            // not the player has ever been anywhere near it.
+            //
+            // ELEVATORTILE only -- ALTELEVATORTILE is deliberately NOT
+            // checked here despite being the other constant in that same
+            // wl_agent.cpp check. It isn't a second placed exit tile at
+            // all: wl_def.h defines it identically to AREATILE ("first of
+            // NUMAREAS floor tiles"), and wl_agent.cpp only ever reads it
+            // at the *player's own tile* at the moment they use the one
+            // real elevator, purely to decide whether that leads to a
+            // normal "completed" or "secret level" ending. Treating it as
+            // an exit location here flagged an ordinary floor cell
+            // (whichever one the level's area numbering happened to
+            // assign code 107) as a fake second exit -- confirmed live on
+            // level 1, which has exactly one real, reachable elevator.
+            if (tilemap[x][y] == ELEVATORTILE)
                 v = ASSIST_TILE_EXIT;
             assist_map_buf[y * MAPSIZE + x] = v;
         }
