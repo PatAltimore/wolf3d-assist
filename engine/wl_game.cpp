@@ -44,12 +44,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_current_level(void)
 // floor), this only classifies a tile once the player has actually seen
 // it or a tile next to it -- i.e. an explored trail, not a full map
 // reveal. Values match the ASSIST_TILE_* constants read by shell.html.
+//
+// ASSIST_TILE_EXIT is the one deliberate exception: it's set below
+// regardless of fog-of-war state (an assist-mode feature, not something
+// the original overhead view or the fog-of-war trail did), so the exit
+// is always visible on the minimap even in never-explored territory.
 #define ASSIST_TILE_UNSEEN  0
 #define ASSIST_TILE_FLOOR   1
 #define ASSIST_TILE_WALL    2
 #define ASSIST_TILE_DOOR    3
 #define ASSIST_TILE_SECRET  4
 #define ASSIST_TILE_ENEMY   5
+#define ASSIST_TILE_EXIT    6
 
 static byte assist_map_buf[MAPSIZE * MAPSIZE];
 
@@ -123,6 +129,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
                 else
                     v = ASSIST_TILE_DOOR;
             }
+            // Outside the `if (seen)` block on purpose -- see
+            // ASSIST_TILE_EXIT's own comment above. tilemap holds the raw
+            // wall-plane tile id for every cell regardless of fog-of-war,
+            // the same array wl_agent.cpp's own elevator-use check reads
+            // (ELEVATORTILE/ALTELEVATORTILE, wl_def.h), so this is exactly
+            // the exit switch's location whether or not the player has
+            // ever been anywhere near it.
+            if (tilemap[x][y] == ELEVATORTILE || tilemap[x][y] == ALTELEVATORTILE)
+                v = ASSIST_TILE_EXIT;
             assist_map_buf[y * MAPSIZE + x] = v;
         }
     }
