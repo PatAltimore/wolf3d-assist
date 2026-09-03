@@ -45,17 +45,23 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_current_level(void)
 // it or a tile next to it -- i.e. an explored trail, not a full map
 // reveal. Values match the ASSIST_TILE_* constants read by shell.html.
 //
-// ASSIST_TILE_EXIT is the one deliberate exception: it's set below
-// regardless of fog-of-war state (an assist-mode feature, not something
-// the original overhead view or the fog-of-war trail did), so the exit
-// is always visible on the minimap even in never-explored territory.
-#define ASSIST_TILE_UNSEEN  0
-#define ASSIST_TILE_FLOOR   1
-#define ASSIST_TILE_WALL    2
-#define ASSIST_TILE_DOOR    3
-#define ASSIST_TILE_SECRET  4
-#define ASSIST_TILE_ENEMY   5
-#define ASSIST_TILE_EXIT    6
+// ASSIST_TILE_EXIT and ASSIST_TILE_KEY_* are the deliberate exceptions:
+// set below regardless of fog-of-war state (an assist-mode feature, not
+// something the original overhead view or the fog-of-war trail did), so
+// the exit and any still-uncollected keys are always visible on the
+// minimap even in never-explored territory -- keys specifically because
+// a locked door (doorobjlist[n].lock, wl_act1.cpp) blocking the path to
+// an already-found exit is otherwise a dead end with no indication of
+// which key, or where it is, fixes it.
+#define ASSIST_TILE_UNSEEN     0
+#define ASSIST_TILE_FLOOR      1
+#define ASSIST_TILE_WALL       2
+#define ASSIST_TILE_DOOR       3
+#define ASSIST_TILE_SECRET     4
+#define ASSIST_TILE_ENEMY      5
+#define ASSIST_TILE_EXIT       6
+#define ASSIST_TILE_KEY_GOLD   7
+#define ASSIST_TILE_KEY_SILVER 8
 
 static byte assist_map_buf[MAPSIZE * MAPSIZE];
 
@@ -152,6 +158,26 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
                 v = ASSIST_TILE_EXIT;
             assist_map_buf[y * MAPSIZE + x] = v;
         }
+    }
+    // Separate pass, not folded into the per-tile loop above -- statobjlist
+    // (every key/weapon/treasure/food pickup on the floor) is normally a
+    // short list, cheaper to walk once directly than to check against for
+    // every one of MAPSIZE*MAPSIZE cells. Same "regardless of fog-of-war"
+    // treatment as ASSIST_TILE_EXIT above, and for the same reason -- see
+    // its own comment. check->shapenum == -1 means already picked up (see
+    // GetBonus, wl_agent.cpp), so a collected key naturally stops showing
+    // once GiveKey has run, no separate tracking needed here. bo_key3/
+    // bo_key4 exist in the item enum (wl_def.h) for Spear of Destiny, but
+    // this build's shareware WL6 graphics (gfxv_wl6.h) only define
+    // GOLDKEYPIC/SILVERKEYPIC -- folded into the silver marker as a safe
+    // fallback that should never actually be exercised by this data.
+    for (statobj_t *s = &statobjlist[0]; s != laststatobj; s++)
+    {
+        if (s->shapenum == -1) continue;
+        if (s->itemnumber == bo_key1)
+            assist_map_buf[s->tiley * MAPSIZE + s->tilex] = ASSIST_TILE_KEY_GOLD;
+        else if (s->itemnumber >= bo_key2 && s->itemnumber <= bo_key4)
+            assist_map_buf[s->tiley * MAPSIZE + s->tilex] = ASSIST_TILE_KEY_SILVER;
     }
     return assist_map_buf;
 }

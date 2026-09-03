@@ -843,6 +843,8 @@
           <div class="map-key-item"><span class="map-key-swatch" style="background:#8a5a2c"></span>Door</div>
           <div class="map-key-item"><span class="map-key-swatch" style="background:#c9a227"></span>Secret pushwall</div>
           <div class="map-key-item"><span class="map-key-swatch" style="background:#3ecf5e; border-radius:50%"></span>Exit (always shown)</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#ffd700; border-radius:50%"></span>Gold key (always shown)</div>
+          <div class="map-key-item"><span class="map-key-swatch" style="background:#d9d9e3; border-radius:50%"></span>Silver key (always shown)</div>
         </div>
       </div>
 
@@ -1321,19 +1323,19 @@
 
     // ---- Explored (fog-of-war) map ----
     // Tile classification matches ASSIST_TILE_* in wl_game.cpp's
-    // assist_get_map(): unseen, floor, wall, door, secret pushwall, enemy,
-    // exit. Indexed by tile value 0-5; exit (6) is deliberately not in
-    // here -- see EXIT_COLOR below for why it's drawn as its own marker
-    // instead of just another flat-filled square.
+    // assist_get_map(): unseen, floor, wall, door, secret pushwall, enemy.
+    // Indexed by tile value 0-5. Exit (6) and the two key colors (7, 8)
+    // are deliberately not in here -- see DOT_COLORS below for why
+    // they're drawn as their own markers instead of a flat-filled square.
     var MAP_COLORS = ["#000000", "#4a3d28", "#7a7a72", "#8a5a2c", "#c9a227", "#b3382c"];
-    // Drawn as a circle, not folded into MAP_COLORS' flat tile fill,
-    // specifically so it reads as "the goal" at a glance instead of
-    // blending in as just another wall/floor-colored square -- and
-    // because ASSIST_TILE_EXIT (wl_game.cpp) is set regardless of
-    // fog-of-war state, this can end up drawn over an otherwise still-
+    // Tile values drawn as a circle rather than folded into MAP_COLORS'
+    // flat fill, specifically so each reads as a landmark at a glance
+    // instead of blending in as just another wall/floor-colored square --
+    // and because wl_game.cpp sets all three of these regardless of
+    // fog-of-war state, they can end up drawn over an otherwise still-
     // black, unexplored tile, which a flat fill would make look like a
     // rendering glitch rather than a deliberate reveal.
-    var EXIT_COLOR = "#3ecf5e";
+    var DOT_COLORS = { 6: "#3ecf5e", 7: "#ffd700", 8: "#d9d9e3" }; // exit, gold key, silver key
     var mapCanvas = document.getElementById("explored-map");
     var mapCtx = mapCanvas.getContext("2d");
     var cachedMapSize = null;
@@ -1356,24 +1358,23 @@
         var cell = mapCanvas.width / size;
         mapCtx.fillStyle = MAP_COLORS[0];
         mapCtx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
-        var exitTiles = [];
+        var dotTiles = []; // [x, y, color, x, y, color, ...] -- exit + any still-uncollected keys
         for (var y = 0; y < size; y++) {
           for (var x = 0; x < size; x++) {
             var v = buf[y * size + x];
             if (v === 0) continue;
-            if (v === 6) { exitTiles.push(x, y); continue; } // exit -- drawn as a dot below, not a flat fill
+            var dotColor = DOT_COLORS[v];
+            if (dotColor) { dotTiles.push(x, y, dotColor); continue; } // drawn as a dot below, not a flat fill
             mapCtx.fillStyle = MAP_COLORS[v];
             mapCtx.fillRect(x * cell, y * cell, Math.ceil(cell), Math.ceil(cell));
           }
         }
-        if (exitTiles.length) {
-          mapCtx.fillStyle = EXIT_COLOR;
-          for (var i = 0; i < exitTiles.length; i += 2) {
-            var ex = exitTiles[i] * cell + cell / 2, ey = exitTiles[i + 1] * cell + cell / 2;
-            mapCtx.beginPath();
-            mapCtx.arc(ex, ey, Math.max(cell * 0.6, 3), 0, Math.PI * 2);
-            mapCtx.fill();
-          }
+        for (var i = 0; i < dotTiles.length; i += 3) {
+          var dx_ = dotTiles[i] * cell + cell / 2, dy_ = dotTiles[i + 1] * cell + cell / 2;
+          mapCtx.fillStyle = dotTiles[i + 2];
+          mapCtx.beginPath();
+          mapCtx.arc(dx_, dy_, Math.max(cell * 0.6, 3), 0, Math.PI * 2);
+          mapCtx.fill();
         }
         if (px >= 0 && py >= 0) {
           var cx = px * cell + cell / 2, cy = py * cell + cell / 2;
