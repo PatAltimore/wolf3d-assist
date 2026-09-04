@@ -1059,8 +1059,33 @@ SD_StopSound(void)
 void
 SD_WaitSoundDone(void)
 {
-    while (SD_SoundPlaying())
+    // Confirmed live (a real device hang, reproduced): this used to spin
+    // forever whenever alSound/pcSound never clears. Those are only ever
+    // cleared from inside the SDL audio callback (see alLengthLeft
+    // counting down, above) -- if the browser doesn't keep invoking that
+    // callback reliably (a real risk under Emscripten: ScriptProcessorNode
+    // has known reliability gaps, especially for a backgrounded/inactive
+    // tab or under a browser's own audio/autoplay throttling), this loop
+    // had no way out. It's called both from every debug-cheat message box
+    // and, more consequentially, from Cmd_Use's elevator handling
+    // (wl_agent.cpp: SD_PlaySound(LEVELDONESND) then this wait right
+    // after) -- which is what "pressed Use at the level exit, the game
+    // hung" actually was: not the level transition itself, but this wait
+    // for a sound that had already effectively stopped mattering.
+    //
+    // Every sound effect this engine ever plays is well under a second,
+    // so capping the wait at ~2 real seconds (140 tics @ 70Hz, matching
+    // GetTimeCount's units) can't cut a normal sound short -- it only
+    // matters when the callback has already gone missing, in which case
+    // the sound was never going to finish on its own anyway. SD_StopSound
+    // forces pcSound/alSound/SoundNumber back to a clean idle state
+    // through the same path a normal stop already uses, so a timeout
+    // here can't leave the *next* sound's own wait timing out too.
+    int32_t start = GetTimeCount();
+    while (SD_SoundPlaying() && (GetTimeCount() - start) < 140)
         SDL_Delay(5);
+    if (SD_SoundPlaying())
+        SD_StopSound();
 }
 
 ///////////////////////////////////////////////////////////////////////////
