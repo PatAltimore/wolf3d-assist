@@ -202,62 +202,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_kills(void) { return gamestate.ki
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_secrets(void) { return gamestate.secretcount; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_best_weapon(void) { return (int)gamestate.bestweapon; }
 
-// Autosave: reuses the engine's own SaveTheGame/LoadTheGame (wl_main.cpp)
-// -- the same routines the interactive Save/Load Game menu writes through
-// -- into a dedicated slot (9, the last of the 10 save slots) reserved for
-// the browser's autosave, using the exact file format CP_SaveGame writes
-// (wl_menu.cpp: a 32-byte name header, then SaveTheGame's raw dump) so the
-// game's own Load Game screen also recognizes it as a normal save.
-//
-// This build always ships the shareware WL1 data (see version.h), so the
-// save extension is always "wl1", matching the "savegam?.wl1" pattern
-// CP_SaveGame/CP_LoadGame construct at runtime for other versions.
-#define ASSIST_SAVE_NAME "savegam9.wl1"
-
-// Mirrors the configdir-prefixing CP_SaveGame/CP_LoadGame do (wl_menu.cpp)
-// -- must match exactly, or the interactive Load Game screen (which the
-// Resume button drives, see web/shell.html) looks in a different place
-// than this writes to.
-static void assist_save_path(char *out, size_t outsize)
-{
-    if (configdir[0])
-        snprintf(out, outsize, "%s/%s", configdir, ASSIST_SAVE_NAME);
-    else
-        snprintf(out, outsize, "%s", ASSIST_SAVE_NAME);
-}
-
-extern "C" EMSCRIPTEN_KEEPALIVE int assist_has_autosave(void)
-{
-    char path[300];
-    assist_save_path(path, sizeof(path));
-    FILE *f = fopen(path, "rb");
-    if (!f)
-        return 0;
-    fclose(f);
-    return 1;
-}
-
-// Only saves mid-gameplay (ingame is false on the title/menu screens,
-// where none of the globals SaveTheGame dumps -- player, tilemap,
-// actorat, ... -- are meaningful).
-extern "C" EMSCRIPTEN_KEEPALIVE int assist_autosave(void)
-{
-    if (!ingame)
-        return 0;
-    char path[300];
-    assist_save_path(path, sizeof(path));
-    FILE *file = fopen(path, "wb");
-    if (!file)
-        return 0;
-    char header[32];
-    memset(header, 0, sizeof(header));
-    strncpy(header, "Browser Autosave", sizeof(header) - 1);
-    fwrite(header, 1, 32, file);
-    fseek(file, 32, SEEK_SET);
-    SaveTheGame(file, 0, 0);
-    fclose(file);
-    return 1;
-}
+// Autosave/resume-on-refresh (a reserved save slot 9 + a banner offering
+// to reload it, driven by synthesizing menu navigation in web/shell.html)
+// was removed by request -- its menu navigation occasionally landed
+// wrong (see the removed banner's own commit history), and a plain
+// restart-to-title-screen on every reload is the preferred behavior. The
+// engine's own interactive Save/Load Game menu (wl_menu.cpp) is
+// untouched and still works exactly as it always has, including still
+// persisting across a reload via the IDBFS mount web/shell.html sets up
+// for it (see the Emscripten bootstrap section there).
 
 // Twin-stick touch input. Left stick drives forward/back (into controly,
 // same as before) plus strafe; right stick turns (into controlx). These

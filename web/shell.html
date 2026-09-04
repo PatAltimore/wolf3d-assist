@@ -86,9 +86,15 @@
     #status { font-size: 15px; color: var(--text-dim); margin-bottom: 4px; min-height: 14px; }
     #progress { width: 300px; }
     /* ---- 3. Game canvas ----
-       .canvas-wrap holds the actual SDL/WASM <canvas> plus the
-       "resume autosave?" banner overlaid on top of it right after
-       boot (position: absolute, so it doesn't affect layout). */
+       .canvas-wrap holds the actual SDL/WASM <canvas>. A page refresh
+       always boots straight to the title screen, same as launching the
+       game fresh -- no resume-from-autosave prompt (removed: it drove
+       the engine's own menu via synthesized key/index input to reach a
+       reserved autosave slot, which was confusing when its navigation
+       occasionally landed wrong). The engine's own in-game Save/Load
+       Game menu still works and still persists across a reload (see the
+       IDBFS mount in part 8, below) -- this only removes the automatic
+       prompt and the dedicated autosave slot behind it. */
     /* Sized explicitly by JS (see sizeCanvasWrap below) before the engine
        initializes -- Wolf4SDL's SDL_WINDOW_RESIZABLE flag makes Emscripten
        auto-detect the canvas's CSS size to pick the SDL window resolution,
@@ -109,30 +115,6 @@
       height: 100% !important;
       image-rendering: pixelated;
     }
-    .resume-banner {
-      position: absolute;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      max-width: 90%;
-      background: var(--panel);
-      border: 2px solid;
-      border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light);
-      padding: 14px 18px;
-      text-align: center;
-      z-index: 10;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
-      /* .canvas-wrap (this banner's positioning parent) sets line-height:0
-         to collapse the canvas's own inline-block baseline gap -- without
-         this override, the banner's text would inherit that 0 and every
-         wrapped line would stack on the same baseline instead of below
-         the previous one, reading as overlapping text on narrow screens
-         where "Saved game found..." wraps to more than one line. */
-      line-height: normal;
-    }
-    .resume-banner p { margin: 0 0 10px; color: var(--white); font-size: 17px; }
-    .resume-banner-actions { display: flex; gap: 10px; justify-content: center; }
-    .resume-banner-actions .assist-btn { font-size: 15px; padding: 6px 14px; flex: 0 0 auto; }
     /* ---- 4. Game controls: touch sticks vs. keyboard legend ----
        Two completely different control surfaces share this one strip
        below the canvas, and only one is ever visible at a time:
@@ -721,13 +703,6 @@
       <progress id="progress" hidden max="100" value="0"></progress>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" width="1280" height="800"></canvas>
-        <div class="resume-banner" id="resume-banner" hidden>
-          <p>Saved game found — probably from an accidental refresh.</p>
-          <div class="resume-banner-actions">
-            <button class="assist-btn" id="resume-yes">Resume</button>
-            <button class="assist-btn" id="resume-no">Dismiss</button>
-          </div>
-        </div>
       </div>
 
       <div class="game-controls" id="game-controls">
@@ -927,7 +902,7 @@
     // with a banner like this one as it comes up):
     //   1. Boot: layout setup           -- canvas sizing, sidebar tabs
     //   2. Assist-mode content          -- hints, Code Museum links, action log
-    //   3. Engine state sync (polling)  -- autosave, floor/kills/map tracking
+    //   3. Engine state sync (polling)  -- floor/kills/map tracking
     //   4. Input bridge, part 1         -- faking keyboard events, debug cheats
     //   5. Input bridge, part 2         -- pause, menu tap-to-select, mode detection
     //   6. Input bridge, part 3         -- the on-screen touch sticks/buttons
@@ -1210,132 +1185,15 @@
     // fog-of-war map works the same way: a setInterval reads a
     // handful of assist_get_* values via Module.ccall, compares them
     // against what was last seen, and reacts (redraw, log an action,
-    // offer to resume, ...) only on an actual change. Covers:
-    // autosave, the resume-from-autosave banner, current-floor/kills/
+    // ...) only on an actual change. Covers: current-floor/kills/
     // secrets/weapon tracking, and the explored-map redraw.
-    // ---- Autosave (protects against accidental refresh/tab-close) ----
-    // assist_autosave (wl_game.cpp) is a no-op that returns 0 unless a
-    // game is actually in progress, so it's safe to call speculatively.
-    function autosaveAndFlush() {
-      if (typeof Module === "undefined" || !Module.ccall || !Module.FS) return;
-      try {
-        var saved = Module.ccall("assist_autosave", "number", [], []);
-        if (saved) {
-          Module.FS.syncfs(false, function (err) {
-            if (err) console.error("Autosave: IndexedDB write failed", err);
-          });
-        }
-      } catch (e) { /* engine not ready yet */ }
-    }
-
-    // ---- Resume-from-autosave banner ----
-    // Offered once, right after boot, if a saved game exists. "Resume"
-    // doesn't call LoadTheGame directly -- it drives the engine's own
-    // Title -> Main Menu -> Load Game -> slot 9 flow via the same keys a
-    // player would press, reusing its battle-tested state transitions
-    // (skips re-initializing the map, resumes music position, etc.)
-    // instead of reimplementing them.
     //
-    // Confirmed live: an earlier version drove this by counting a fixed
-    // number of DownArrow presses from an assumed cursor start (0), the
-    // same way a player tapping arrow keys would -- but that assumption
-    // doesn't hold. DrawMainMenu (wl_menu.cpp) forces the cursor to
-    // "Back to Game" (index 7) whenever `ingame` is true, which it is
-    // *during attract-mode demo playback* -- so if Resume's first Enter
-    // happened to interrupt a demo already in progress (very plausible:
-    // the banner itself needs a moment after boot to appear, then a real
-    // person to notice and click it), the menu opened with the cursor
-    // already at 7, not 0, and "3x DownArrow" landed 3 items past the
-    // wrong start -- selecting the wrong submenu, and everything after
-    // that (the load-slot navigation) scrolled through whatever *that*
-    // menu turned out to be instead. That's what looked like "menus
-    // clicked through, the selection screen scrolls".
-    //
-    // Fixed by using assist_menu_set_item (wl_menu.cpp) -- the same
-    // mechanism the canvas tap-to-select handler below already uses --
-    // to jump straight to the target item by absolute index, which
-    // doesn't care where the cursor started. Each step also confirms the
-    // menu it expects (by item count -- MainMenu has 9 items, the Load/
-    // Save screen has 10, both fixed in wl_menu.cpp) actually opened
-    // before touching it, polling rather than trusting a fixed sleep to
-    // outlast however long a title/demo transition takes.
-    var resumeBanner = document.getElementById("resume-banner");
-    var resumeCheckInterval = setInterval(function () {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try {
-        var has = Module.ccall("assist_has_autosave", "number", [], []);
-        clearInterval(resumeCheckInterval);
-        if (has) resumeBanner.hidden = false;
-      } catch (e) { /* engine not ready yet -- try again next tick */ }
-    }, 500);
-
-    document.getElementById("resume-no").addEventListener("click", function () {
-      resumeBanner.hidden = true;
-    });
-
-    function menuItemCount() {
-      if (typeof Module === "undefined" || !Module.ccall) return 0;
-      try { return Module.ccall("assist_menu_item_count", "number", [], []); }
-      catch (e) { return 0; }
-    }
-    function selectMenuItem(index) {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try { Module.ccall("assist_menu_set_item", null, ["number"], [index]); }
-      catch (e) { /* engine not ready yet */ }
-    }
-    // Polls for a menu with exactly `expectedCount` items, sending Enter
-    // (to advance past whatever non-itemized screen -- title, credits,
-    // high scores, a live demo -- is currently showing; see
-    // assist_menu_item_count's own comment on the tap-to-select handler
-    // below for why those all report 0) up to `maxTaps` times while
-    // waiting, rather than assuming a single Enter or a fixed delay is
-    // always enough. Only safe to use *before* a menu is open -- Enter
-    // there just interrupts a non-interactive screen. Once inside a
-    // menu, an extra blind Enter would confirm whatever item the cursor
-    // already happens to be on instead, which is a real action, not a
-    // no-op -- see waitForMenu below for the version used after that
-    // point.
-    async function reachMenu(expectedCount, maxTaps) {
-      for (var attempt = 0; attempt <= maxTaps; attempt++) {
-        if (menuItemCount() === expectedCount) return true;
-        if (attempt < maxTaps) { await tap("Enter"); await sleep(300); }
-      }
-      return false;
-    }
-    // Pure polling, no input sent -- for confirming a menu opened after
-    // a deliberate Enter already sent to open it (e.g. selecting "Load
-    // Game"). Unlike reachMenu above, retrying here can't safely mean
-    // "send another Enter": we're already inside a menu at this point,
-    // so an extra Enter would confirm/select whatever's currently
-    // highlighted rather than harmlessly advancing past a title/demo
-    // screen. If the expected menu never shows up, the caller bails
-    // instead of guessing with more input.
-    async function waitForMenu(expectedCount, tries, delayMs) {
-      for (var attempt = 0; attempt < tries; attempt++) {
-        if (menuItemCount() === expectedCount) return true;
-        await sleep(delayMs);
-      }
-      return menuItemCount() === expectedCount;
-    }
-    document.getElementById("resume-yes").addEventListener("click", async function () {
-      resumeBanner.hidden = true;
-      document.getElementById("canvas").focus();
-      toast("Resuming...");
-      if (!(await reachMenu(9, 10))) { // Main Menu, wl_menu.cpp's MainMenu[]
-        toast("Couldn't reach the menu -- open Load Game manually");
-        return;
-      }
-      selectMenuItem(3); // Load Game (MainMenu[3], wl_menu.cpp)
-      await sleep(100);
-      await tap("Enter");
-      if (!(await waitForMenu(10, 8, 150))) { // Load/Save screen, wl_menu.cpp's LSMenu[]
-        toast("Couldn't open Load Game -- try it manually");
-        return;
-      }
-      selectMenuItem(9); // slot 9 -- ASSIST_SAVE_NAME, wl_game.cpp
-      await sleep(100);
-      await tap("Enter");
-    });
+    // No autosave/resume-on-refresh here (removed by request) -- a page
+    // reload always boots straight to the title screen, the same as
+    // launching the game fresh. The engine's own in-game Save/Load Game
+    // menu is unaffected and still persists across a reload on its own
+    // (see the IDBFS mount in part 8, below); this only removed the
+    // automatic prompt and the dedicated slot it drove.
 
     // Always follows the engine's actual current floor (see
     // assist_get_current_level in wl_game.cpp) -- polled since there's no
@@ -1350,7 +1208,6 @@
           lastSyncedLevel = lvl;
           renderHint(lvl);
           if (!isFirstCheck) {
-            autosaveAndFlush(); // don't fire on the initial title-screen read
             var floorHints = HINTS.find(function (x) { return x.level === lvl; });
             var floorLinks = floorHints ? floorHints.tips.slice(0, 2).map(function (t) { return { slug: t.slug, label: t.label }; }) : [];
             logAction("floor", "Reached Floor " + lvl, floorLinks);
@@ -2395,8 +2252,11 @@
     // `Module` object below is Emscripten's own hook -- everything on
     // it (canvas, setStatus, preRun, ...) is a name it looks for by
     // convention, not this project's invention. Mounting an
-    // IndexedDB-backed filesystem at /save here is what lets autosave
-    // (part 3, above) survive a page reload.
+    // IndexedDB-backed filesystem at /save here is what lets a save made
+    // through the engine's own in-game Save Game menu survive a page
+    // reload -- unrelated to the removed autosave/resume-on-refresh
+    // prompt (part 3, above); this is the same configdir a player's own
+    // manual saves have always used.
     // ---- Emscripten module wiring ----
     var statusElement = document.getElementById("status");
     var progressElement = document.getElementById("progress");
@@ -2435,16 +2295,16 @@
         this.totalDependencies = Math.max(this.totalDependencies, left);
         setStatus(left ? "Preparing... (" + (this.totalDependencies - left) + "/" + this.totalDependencies + ")" : "All downloads complete.");
       },
-      // Save games (see ASSIST_SAVE_PATH in wl_game.cpp) go to /save, a
-      // separate IndexedDB-backed mount from the read-only preloaded
-      // shareware data at /, so autosaves survive a page reload.
+      // Manual save games (the engine's own Save Game menu) go to /save,
+      // a separate IndexedDB-backed mount from the read-only preloaded
+      // shareware data at /, so they survive a page reload.
       arguments: ["--configdir", "/save"],
       preRun: [function () {
         FS.mkdir("/save");
         FS.mount(FS.filesystems.IDBFS, {}, "/save");
         Module.addRunDependency("assist-idbfs-init");
         FS.syncfs(true, function (err) {
-          if (err) console.error("Autosave: IndexedDB read failed", err);
+          if (err) console.error("Save game: IndexedDB read failed", err);
           Module.removeRunDependency("assist-idbfs-init");
         });
       }]
@@ -2453,6 +2313,27 @@
     window.onerror = function () {
       setStatus("Exception thrown, see JavaScript console");
     };
+
+    // A save made through the engine's own in-game Save Game menu lands
+    // in Emscripten's in-memory IDBFS-backed tree, but nothing actually
+    // reaches real browser IndexedDB storage without an explicit
+    // FS.syncfs(false, ...) flush -- the removed autosave feature used
+    // to be what called that (incidentally, as a side effect of its own
+    // periodic write), so a manual save would otherwise go quietly
+    // unpersisted now: it would work until the next reload, then be
+    // gone, with no error to explain why. Flushing periodically here,
+    // independent of autosave, keeps manual saves durable without
+    // needing any hook into when SaveTheGame actually ran (nothing here
+    // has one -- it's deep in the C menu code). Cheap enough to be a
+    // no-op on every tick where nothing changed.
+    setInterval(function () {
+      if (typeof Module === "undefined" || !Module.FS) return;
+      try {
+        Module.FS.syncfs(false, function (err) {
+          if (err) console.error("Save game: IndexedDB write failed", err);
+        });
+      } catch (e) { /* engine not ready yet */ }
+    }, 5000);
   </script>
   {{{ SCRIPT }}}
 </body>
