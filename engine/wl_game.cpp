@@ -171,9 +171,27 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
     // this build's shareware WL6 graphics (gfxv_wl6.h) only define
     // GOLDKEYPIC/SILVERKEYPIC -- folded into the silver marker as a safe
     // fallback that should never actually be exercised by this data.
+    //
+    // The tilex/tiley >= MAPSIZE bounds check below is not defensive
+    // hedging -- confirmed live, the crash it prevents is real. tilex/
+    // tiley are byte (0-255), and unlike the per-tile loop above (which
+    // only ever indexes assist_map_buf with its own x/y, always safely
+    // 0..MAPSIZE-1 by construction), this loop uses statobj-supplied
+    // values directly as the index. assist_get_map runs off a plain JS
+    // setInterval poll with no coordination with the engine's own
+    // execution, so it can land mid-SetupGameLevel while statobjlist
+    // entries are still being placed; an entry read before its tilex/
+    // tiley is fully written landed one outside 0..63 here, and the
+    // unbounded write (assist_map_buf is only MAPSIZE*MAPSIZE bytes)
+    // scribbled over adjacent global memory -- observed as `player`
+    // itself becoming a garbage pointer moments later (assist_get_player_x
+    // trapped with "memory access out of bounds"), which is what a real
+    // player saw as "the screen goes black, the game doesn't start" right
+    // after finishing the New Game menu flow.
     for (statobj_t *s = &statobjlist[0]; s != laststatobj; s++)
     {
         if (s->shapenum == -1) continue;
+        if (s->tilex >= MAPSIZE || s->tiley >= MAPSIZE) continue;
         if (s->itemnumber == bo_key1)
             assist_map_buf[s->tiley * MAPSIZE + s->tilex] = ASSIST_TILE_KEY_GOLD;
         else if (s->itemnumber >= bo_key2 && s->itemnumber <= bo_key4)

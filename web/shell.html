@@ -2305,6 +2305,16 @@
         Module.addRunDependency("assist-idbfs-init");
         FS.syncfs(true, function (err) {
           if (err) console.error("Save game: IndexedDB read failed", err);
+          // Gates the periodic flush below -- confirmed live: starting
+          // it unconditionally from page load broke boot entirely
+          // (Module.calledRun stayed false forever, canvas permanently
+          // black, no error surfaced anywhere). IDBFS's syncfs doesn't
+          // tolerate an overlapping call while one is already in flight,
+          // and this *read* sync is exactly what removeRunDependency
+          // below is gating main() on -- a periodic *write* sync firing
+          // before this callback runs could interfere with it and the
+          // dependency would never clear.
+          assistIdbfsReady = true;
           Module.removeRunDependency("assist-idbfs-init");
         });
       }]
@@ -2326,13 +2336,25 @@
     // needing any hook into when SaveTheGame actually ran (nothing here
     // has one -- it's deep in the C menu code). Cheap enough to be a
     // no-op on every tick where nothing changed.
+    //
+    // Two guards, both confirmed necessary live, not just defensive
+    // hedging: assistIdbfsReady (set above) keeps this from firing
+    // before the preRun mount+read-sync has finished, and
+    // assistIdbfsSyncInFlight keeps two of *this* interval's own syncfs
+    // calls from overlapping each other if one is ever still running
+    // when the next tick fires (e.g. a slow/throttled background tab).
+    var assistIdbfsReady = false;
+    var assistIdbfsSyncInFlight = false;
     setInterval(function () {
+      if (!assistIdbfsReady || assistIdbfsSyncInFlight) return;
       if (typeof Module === "undefined" || !Module.FS) return;
+      assistIdbfsSyncInFlight = true;
       try {
         Module.FS.syncfs(false, function (err) {
+          assistIdbfsSyncInFlight = false;
           if (err) console.error("Save game: IndexedDB write failed", err);
         });
-      } catch (e) { /* engine not ready yet */ }
+      } catch (e) { assistIdbfsSyncInFlight = false; /* engine not ready yet */ }
     }, 5000);
   </script>
   {{{ SCRIPT }}}
