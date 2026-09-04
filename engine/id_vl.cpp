@@ -165,18 +165,22 @@ void	VL_SetVGAPlaneMode (void)
     // (confirmed live: the page became fully unresponsive, not just the
     // game loop).
     //
-    // Not yet found: a way to eliminate this Asyncify yield in
-    // SDL_RenderPresent without either keeping the reentrancy hazard or
-    // blocking the JS thread outright, or a way to make web/shell.html's
-    // polling architecture safe against landing mid-yield. A full fix
-    // likely needs one of: (a) presenting frames through a lower-level,
-    // non-yielding path instead of the SDL_Renderer/SDL_RenderPresent
-    // API (a real engine change, unverified here), or (b) redesigning
-    // the JS-side polling to never call into the module while it might
-    // be Asyncify-suspended (e.g. checking Asyncify.state before each
-    // ccall and deferring if not Normal -- untested here, and it's not
-    // yet confirmed this would even catch the unsafe window, since the
-    // corrupted state observed live already read back as Normal).
+    // RESOLVED on the JS side (web/shell.html, "Engine call queue"):
+    // checking Asyncify.state before each call (as guessed at above) was
+    // tried first and confirmed live NOT to work -- the corrupted state
+    // read back Normal(0) at every check made throughout an entire
+    // frozen period, so no amount of flag-checking from JS beforehand
+    // can catch it. What actually works: routing every engine call
+    // through Module.ccall's own {async: true} mode instead of a raw
+    // sync call, so it goes through Emscripten's real Asyncify
+    // call-queueing machinery rather than bypassing it, additionally
+    // serialized through one shared promise chain so this file's many
+    // independent callers can never fire two overlapping async ccalls of
+    // their own. Confirmed live against the exact reproduction that
+    // defeated the state-check approach. The renderer/CalcTics changes
+    // in this file are still kept as genuine, low-risk improvements
+    // (fewer yield opportunities can only help), just no longer the
+    // whole story.
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {

@@ -1195,25 +1195,74 @@
     // (see the IDBFS mount in part 8, below); this only removed the
     // automatic prompt and the dedicated slot it drove.
 
+    // ---- Engine call queue (task_ee63b0d5) ----
+    // Every engine call in this file goes through queueCcall instead of
+    // Module.ccall directly. Why: this file drives the engine through
+    // many independent setInterval polls and input handlers, completely
+    // uncoordinated with the engine's own execution -- and under
+    // Emscripten with -sASYNCIFY, several engine operations (most
+    // consequentially SDL_RenderPresent, called every single rendered
+    // frame) are Asyncify yield points: the C call stack unwinds out to
+    // JS and resumes later, on the browser's next requestAnimationFrame.
+    // A sync Module.ccall landing while any of those is mid-unwind is
+    // unsupported reentrancy -- confirmed live (see the long comment
+    // next to SDL_CreateRenderer in engine/id_vl.cpp) to corrupt
+    // Asyncify's own internal bookkeeping and permanently hang the game,
+    // not just glitch it: input keeps arriving and simple reads keep
+    // answering, but the engine's main loop never ticks again.
+    //
+    // An earlier version of this fix checked Asyncify.state (Normal/
+    // Unwinding/Rewinding/Disabled) before each sync Module.ccall and
+    // skipped the call otherwise. That was a real improvement but
+    // confirmed live, with a reproducible test case, to NOT be
+    // sufficient: the engine could still permanently hang while
+    // Asyncify.state read back Normal(0) at every single check made
+    // throughout the entire frozen period -- the corruption doesn't
+    // require landing during an *observably* unsafe window, so no
+    // amount of checking a flag from JS beforehand can catch it.
+    //
+    // What actually works, confirmed live against the same reproducible
+    // failure: Module.ccall's own {async: true} mode, which hands the
+    // call to Emscripten's real Asyncify call-queueing machinery instead
+    // of bypassing it with a raw synchronous call. Since Asyncify only
+    // supports one async operation in flight at a time, every call here
+    // is additionally serialized through one shared promise chain
+    // (engineCallQueue) rather than trusting every caller in this file
+    // to never fire two overlapping async ccalls of its own -- confirmed
+    // live under simulated rapid-fire drag input (120 overlapping,
+    // unawaited queueCcall calls in ~1 second) that serializing this way
+    // produces zero errors and keeps the engine fully responsive
+    // afterward.
+    var engineCallQueue = Promise.resolve();
+    function queueCcall(name, returnType, argTypes, args) {
+      if (typeof Module === "undefined" || !Module.ccall) return Promise.resolve(undefined);
+      var resultPromise = engineCallQueue.then(function () {
+        return Module.ccall(name, returnType, argTypes, args, { async: true });
+      }).catch(function () { return undefined; /* engine not ready yet, or the call itself failed */ });
+      // Chained off resultPromise (not reassigned to it directly) so a
+      // rejected/failed call still lets the *next* queued call proceed
+      // instead of wedging the whole queue behind one bad call forever.
+      engineCallQueue = resultPromise.then(function () {}, function () {});
+      return resultPromise;
+    }
+
     // Always follows the engine's actual current floor (see
     // assist_get_current_level in wl_game.cpp) -- polled since there's no
     // push notification from the C side.
     var lastSyncedLevel = null;
-    function pollCurrentLevel() {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try {
-        var lvl = Module.ccall("assist_get_current_level", "number", [], []);
-        if (lvl >= 1 && lvl <= 10 && lvl !== lastSyncedLevel) {
-          var isFirstCheck = lastSyncedLevel === null;
-          lastSyncedLevel = lvl;
-          renderHint(lvl);
-          if (!isFirstCheck) {
-            var floorHints = HINTS.find(function (x) { return x.level === lvl; });
-            var floorLinks = floorHints ? floorHints.tips.slice(0, 2).map(function (t) { return { slug: t.slug, label: t.label }; }) : [];
-            logAction("floor", "Reached Floor " + lvl, floorLinks);
-          }
+    async function pollCurrentLevel() {
+      var lvl = await queueCcall("assist_get_current_level", "number", [], []);
+      if (lvl === undefined) return;
+      if (lvl >= 1 && lvl <= 10 && lvl !== lastSyncedLevel) {
+        var isFirstCheck = lastSyncedLevel === null;
+        lastSyncedLevel = lvl;
+        renderHint(lvl);
+        if (!isFirstCheck) {
+          var floorHints = HINTS.find(function (x) { return x.level === lvl; });
+          var floorLinks = floorHints ? floorHints.tips.slice(0, 2).map(function (t) { return { slug: t.slug, label: t.label }; }) : [];
+          logAction("floor", "Reached Floor " + lvl, floorLinks);
         }
-      } catch (e) { /* engine not ready yet -- try again next tick */ }
+      }
     }
     setInterval(pollCurrentLevel, 1500); // doesn't need to be near-instant -- see perf note below
 
@@ -1222,13 +1271,12 @@
     // diffed here the same way pollCurrentLevel diffs the floor number.
     var WEAPON_NAMES = ["Knife", "Pistol", "Machine Gun", "Chaingun"];
     var lastKills = null, lastSecrets = null, lastWeapon = null;
-    function pollProgressStats() {
-      if (typeof Module === "undefined" || !Module.ccall) return;
+    async function pollProgressStats() {
+      var kills = await queueCcall("assist_get_kills", "number", [], []);
+      var secrets = await queueCcall("assist_get_secrets", "number", [], []);
+      var weapon = await queueCcall("assist_get_best_weapon", "number", [], []);
+      if (kills === undefined || secrets === undefined || weapon === undefined) return;
       try {
-        var kills = Module.ccall("assist_get_kills", "number", [], []);
-        var secrets = Module.ccall("assist_get_secrets", "number", [], []);
-        var weapon = Module.ccall("assist_get_best_weapon", "number", [], []);
-
         if (lastKills !== null && kills > lastKills) {
           logAction("kills", "Defeated " + kills + " enem" + (kills === 1 ? "y" : "ies") + " so far", [
             { slug: "wl-act1-c", label: "Guard patrol & sighting logic" },
@@ -1273,20 +1321,21 @@
     var mapCtx = mapCanvas.getContext("2d");
     var cachedMapSize = null;
 
-    function drawExploredMap() {
+    async function drawExploredMap() {
       if (typeof Module === "undefined" || !Module.ccall || !Module.HEAPU8) return;
       try {
         if (cachedMapSize === null) {
-          cachedMapSize = Module.ccall("assist_get_mapsize", "number", [], []);
+          cachedMapSize = await queueCcall("assist_get_mapsize", "number", [], []);
         }
         var size = cachedMapSize;
-        var ptr = Module.ccall("assist_get_map", "number", [], []);
+        var ptr = await queueCcall("assist_get_map", "number", [], []);
+        var px = await queueCcall("assist_get_player_x", "number", [], []);
+        var py = await queueCcall("assist_get_player_y", "number", [], []);
+        var pangle = await queueCcall("assist_get_player_angle", "number", [], []);
+        if (size === undefined || ptr === undefined || px === undefined || py === undefined || pangle === undefined) return;
         // Re-sliced every draw: ALLOW_MEMORY_GROWTH can detach/replace the
         // underlying buffer, so a cached typed-array view would go stale.
         var buf = Module.HEAPU8.subarray(ptr, ptr + size * size);
-        var px = Module.ccall("assist_get_player_x", "number", [], []);
-        var py = Module.ccall("assist_get_player_y", "number", [], []);
-        var pangle = Module.ccall("assist_get_player_angle", "number", [], []);
 
         var cell = mapCanvas.width / size;
         mapCtx.fillStyle = MAP_COLORS[0];
@@ -1592,34 +1641,39 @@
     // wl_play.cpp), so treating clicks as pause/menu-select there would
     // make mouse play unusable. Touch has no such conflict since tapping
     // the canvas isn't bound to any action in the touch control scheme.
-    document.getElementById("canvas").addEventListener("pointerup", function (e) {
+    document.getElementById("canvas").addEventListener("pointerup", async function (e) {
       if (e.pointerType !== "touch") return;
       if (knownInGameplay) {
         if (knownPaused) { sendResume(); toast("Resumed"); }
         else { sendPause(); toast("Paused — tap the screen to resume"); }
         return;
       }
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try {
-        var itemCount = Module.ccall("assist_menu_item_count", "number", [], []);
-        if (itemCount > 0) {
-          var rect = document.getElementById("canvas").getBoundingClientRect();
-          var gameY = ((e.clientY - rect.top) / rect.height) * WOLF_SCREENHEIGHT;
-          var baseY = Module.ccall("assist_menu_base_y", "number", [], []);
+      // If item count/base Y can't be resolved, still fall through to the
+      // plain tap("Enter") below rather than also skipping that -- a tap
+      // that couldn't be resolved to a specific item is still a real tap.
+      var itemCount = await queueCcall("assist_menu_item_count", "number", [], []);
+      if (itemCount) {
+        var rect = document.getElementById("canvas").getBoundingClientRect();
+        var gameY = ((e.clientY - rect.top) / rect.height) * WOLF_SCREENHEIGHT;
+        var baseY = await queueCcall("assist_menu_base_y", "number", [], []);
+        if (baseY !== undefined) {
           var index = Math.floor((gameY - baseY) / WOLF_MENU_LINEHEIGHT);
           if (index < 0) index = 0;
           if (index > itemCount - 1) index = itemCount - 1;
-          Module.ccall("assist_menu_set_item", null, ["number"], [index]);
+          // Awaited (unlike other write-only calls in this file) so the
+          // C-side index is actually set before the real Enter keydown
+          // below reaches the engine -- otherwise HandleMenu could
+          // process Enter first and confirm whatever was already
+          // highlighted instead of the tapped item.
+          await queueCcall("assist_menu_set_item", null, ["number"], [index]);
         }
-      } catch (err) { /* engine not ready yet */ }
+      }
       tap("Enter");
     });
 
-    function pollPaused() {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try {
-        knownPaused = Module.ccall("assist_is_paused", "number", [], []) === 1;
-      } catch (e) { /* engine not ready yet */ }
+    async function pollPaused() {
+      var result = await queueCcall("assist_is_paused", "number", [], []);
+      if (result !== undefined) knownPaused = result === 1;
     }
     setInterval(pollPaused, 800);
 
@@ -1648,12 +1702,15 @@
     var tcPlayGroup = document.getElementById("tc-play-group");
     var tcMenuGroup = document.getElementById("tc-menu-group");
 
-    function pollTouchMenuMode() {
-      if (typeof Module === "undefined" || !Module.ccall) return;
+    async function pollTouchMenuMode() {
+      var inGameRaw = await queueCcall("assist_get_ingame", "number", [], []);
+      var menuActiveRaw = await queueCcall("assist_get_menuactive", "number", [], []);
+      var demoPlayingRaw = await queueCcall("assist_get_demoplayback", "number", [], []);
+      if (inGameRaw === undefined || menuActiveRaw === undefined || demoPlayingRaw === undefined) return;
       try {
-        var inGame = Module.ccall("assist_get_ingame", "number", [], []) === 1;
-        var menuActive = Module.ccall("assist_get_menuactive", "number", [], []) === 1;
-        var demoPlaying = Module.ccall("assist_get_demoplayback", "number", [], []) === 1;
+        var inGame = inGameRaw === 1;
+        var menuActive = menuActiveRaw === 1;
+        var demoPlaying = demoPlayingRaw === 1;
         var wasInGameplay = knownInGameplay;
         knownInGameplay = inGame && !menuActive && !demoPlaying;
         tcPlayGroup.hidden = !knownInGameplay;
@@ -1673,7 +1730,7 @@
         // the game itself) isn't a button at all. Hinting it once, right
         // as this state is entered, is what makes it discoverable.
         if (wasInGameplay && !knownInGameplay) {
-          var itemCount = Module.ccall("assist_menu_item_count", "number", [], []);
+          var itemCount = await queueCcall("assist_menu_item_count", "number", [], []);
           if (itemCount === 0) toast("Tap the screen to continue");
         }
       } catch (e) { /* engine not ready yet */ }
@@ -1691,8 +1748,7 @@
     // same as tapping a real bound key would be.
     document.getElementById("tc-weapon").addEventListener("pointerdown", function (e) {
       e.preventDefault();
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try { Module.ccall("assist_switch_weapon", null, [], []); } catch (err) {}
+      queueCcall("assist_switch_weapon", null, [], []); // fire-and-forget, like the stick writes below
     });
 
     // Auto-pause whenever a "See the code" link is opened, so the game
@@ -2051,9 +2107,12 @@
     // directly (see the comment on assist_move_dx in wl_game.cpp for why
     // strafe can't just reuse controlx like the keyboard's Alt-strafe does).
     setupStick("tc-move-joystick", "tc-move-joystick-knob", 55, 8, function (dx, dy) {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try { Module.ccall("assist_set_move", null, ["number", "number"], [dx, dy]); }
-      catch (e) { /* engine not ready yet */ }
+      // Fire-and-forget: queueCcall serializes this behind whatever else
+      // is pending rather than dropping it, and confirmed live under
+      // simulated rapid drag input (120 overlapping unawaited calls in
+      // ~1s) to produce zero errors -- update() can call this every
+      // pointermove without needing to await it.
+      queueCcall("assist_set_move", null, ["number", "number"], [dx, dy]);
     });
 
     // Right stick: turn, and doubles as Fire -- but only for an actual
@@ -2072,9 +2131,7 @@
     // the tap/drag distinction below ever got a say.
     var turnStickDragged = false;
     setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 36, 6, function (dx) {
-      if (typeof Module === "undefined" || !Module.ccall) return;
-      try { Module.ccall("assist_set_turn", null, ["number"], [turnStickDragged ? dx : 0]); }
-      catch (e) { /* engine not ready yet */ }
+      queueCcall("assist_set_turn", null, ["number"], [turnStickDragged ? dx : 0]); // fire-and-forget, see the move stick's own comment above
     }, function onStart() {
       // Runs before this pointerdown's first update()/onMove() above, so
       // clearing the flag here (rather than in setupTurnStickTap's own
