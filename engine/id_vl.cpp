@@ -112,7 +112,72 @@ void	VL_SetVGAPlaneMode (void)
 
     // [FG] create renderer
 
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
+    // No SDL_RENDERER_PRESENTVSYNC -- investigating a real, reproduced
+    // engine hang (task_6c3de040). Full findings, since this is the
+    // actual hot spot (VL_Flip below is where the hang was pinned down
+    // to, every time it was reproduced):
+    //
+    // Root cause: web/shell.html's assist-mode UI drives this engine
+    // through plain synchronous Module.ccall from several independent
+    // setInterval polls (current floor, the explored map, touch-stick
+    // input, ...), completely uncoordinated with the engine's own
+    // execution. Under Emscripten with -sASYNCIFY, SDL_RenderPresent
+    // (called every frame from VL_Flip, below) is an Asyncify yield
+    // point -- it unwinds the C call stack out to JS and waits to be
+    // resumed on the browser's next requestAnimationFrame. A sync ccall
+    // landing while that unwind is in flight is unsupported reentrancy.
+    // Confirmed live with an isolated SDL_Delay probe added temporarily
+    // while investigating this (since removed): one such reentrant call
+    // left Asyncify's own internal bookkeeping (Asyncify.state/currData,
+    // inspectable from the browser console) inconsistent -- state read
+    // back as Normal(0) while currData was still a stale non-null
+    // pointer, meaning a pending resume never correctly completed -- and
+    // the *next* ccall afterward crashed with a genuine WASM "memory
+    // access out of bounds" trap, not just misbehaved. Reproduced with
+    // temporary stage-checkpoint instrumentation through GameLoop/
+    // PlayLoop/ThreeDRefresh/VL_Flip (since removed): execution was
+    // frozen exactly between SDL_BlitSurface and SDL_RenderPresent
+    // returning, every time it was reproduced.
+    //
+    // This vsync removal (a vsync-locked present is by far the most
+    // frequent Asyncify yield point in the engine -- once per rendered
+    // frame, vs. CalcTics's occasional zero-tics case or the discrete
+    // SD_WaitSoundDone/IN_Ack waits) and the same removal of CalcTics's
+    // own SDL_Delay (wl_draw.cpp) are both kept as reasonable, low-risk
+    // partial mitigations -- fewer Asyncify yield opportunities is
+    // strictly better -- but confirmed NOT sufficient alone: the hang
+    // still reproduced identically with both applied, and NOT only via
+    // the Warp cheat this investigation started from -- the shortest
+    // reproduction found was simply starting a new game on floor 1 and
+    // tapping the God Mode cheat button once (which itself yields, via
+    // its own IN_Ack() message-box wait). This is a general risk
+    // anywhere the JS-side polling can land during any Asyncify yield
+    // in the engine, not a Warp-specific or even a level-transition
+    // -specific bug -- treat it as reproducible from ordinary play, not
+    // just from debug cheats, when scoping a real fix. SDL_RenderPresent
+    // still yields via Asyncify under Emscripten regardless of the vsync
+    // flag (this appears to be an implementation detail of Emscripten's
+    // SDL2 Renderer bridge itself, not something controlled by the flag).
+    // SDL_HINT_EMSCRIPTEN_ASYNCIFY=0 (SDL_hints.h), which disables
+    // SDL2's own emscripten_sleep calls entirely, was also tried and
+    // reverted -- it made things categorically worse, turning the yield
+    // into a busy-wait that blocked the entire browser tab's JS thread
+    // (confirmed live: the page became fully unresponsive, not just the
+    // game loop).
+    //
+    // Not yet found: a way to eliminate this Asyncify yield in
+    // SDL_RenderPresent without either keeping the reentrancy hazard or
+    // blocking the JS thread outright, or a way to make web/shell.html's
+    // polling architecture safe against landing mid-yield. A full fix
+    // likely needs one of: (a) presenting frames through a lower-level,
+    // non-yielding path instead of the SDL_Renderer/SDL_RenderPresent
+    // API (a real engine change, unverified here), or (b) redesigning
+    // the JS-side polling to never call into the module while it might
+    // be Asyncify-suspended (e.g. checking Asyncify.state before each
+    // ccall and deferring if not Normal -- untested here, and it's not
+    // yet confirmed this would even catch the unsafe window, since the
+    // corrupted state observed live already read back as Normal).
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
@@ -282,6 +347,9 @@ void VL_GetColor	(int color, int *red, int *green, int *blue)
  */
 
 // IOANCH: major thanks to http://sandervanderburg.blogspot.ro/2014/05/rendering-8-bit-palettized-surfaces-in.html
+// SDL_RenderPresent below is where a real, reproduced engine hang
+// (task_6c3de040) was pinned down to -- see the long comment on renderer
+// creation, above, for the full investigation.
 void VL_Flip()
 {
    SDL_UpdateTexture(texture, NULL, screen->pixels, screen->pitch);

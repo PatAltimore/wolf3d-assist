@@ -1099,8 +1099,26 @@ void CalcTics (void)
     tics = (curtime * 7) / 100 - lasttimecount;
     if(!tics)
     {
-        // wait until end of current tic
-        SDL_Delay(((lasttimecount + 1) * 100) / 7 - curtime);
+        // Used to SDL_Delay() here to wait out the rest of the current
+        // tic before forcing tics=1. Removed as one contributing factor
+        // in a real, reproduced engine hang (task_6c3de040) -- SDL_Delay
+        // is an Asyncify yield point, and this branch can be hit on
+        // essentially every call under Emscripten (any browser frame
+        // faster than Wolf3D's own ~14ms tic hits it), making it a
+        // frequent opportunity for the reentrancy problem described in
+        // detail next to VL_Flip (id_vl.cpp) -- read that comment first;
+        // this removal alone is *not* a fix for that hang (confirmed
+        // live: the hang reproduced identically with this change alone),
+        // it just closes one of the two yield points found, on the
+        // reasonable theory that fewer yield opportunities is strictly
+        // better even though it wasn't sufficient by itself. tics is
+        // already forced to 1 immediately after regardless of whether
+        // this delay ran, so skipping it doesn't change the tic value
+        // this function produces -- only that it stops yielding through
+        // Asyncify to "wait out" a boundary that requestAnimationFrame
+        // -driven pacing already governs on this platform. The original
+        // DOS timer-interrupt reason for a real wait here doesn't apply
+        // in a browser main loop the same way.
         tics = 1;
     }
 
