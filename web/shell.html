@@ -130,10 +130,9 @@
        mutually exclusive -- whichever one currently applies (see the
        auto-detect media query and the manual force-*-controls override
        further down) is what shows here: the left stick moves + strafes,
-       the right stick turns and doubles as Fire on a tap (see
-       assist_set_move/assist_set_turn in wl_game.cpp and
-       setupTurnStickTap below) when touch applies, Space uses either
-       way. */
+       the right stick turns (see assist_set_move/assist_set_turn in
+       wl_game.cpp), and the dedicated tc-fire button fires, when touch
+       applies; Space uses either way. */
     .game-controls {
       width: 100%;
       max-width: 1100px;
@@ -278,10 +277,10 @@
        class's 50% -- 50% of a non-square box makes an ellipse, not a
        stadium) to communicate "slides sideways" at a glance, rather than
        just constraining a circle in JS and leaving the shape to imply
-       omnidirectional movement it doesn't have. Its knob is tinted the
-       same orange/red as the old dedicated FIRE button -- as a visual
-       reminder that touching it fires (see setupTurnStickTap below: a tap
-       fires, a drag turns). */
+       omnidirectional movement it doesn't have. Its knob keeps the same
+       orange/red tint as the dedicated Fire button (tc-fire) beside it,
+       just for visual grouping in the fire/turn column -- this stick
+       itself is turn-only, tapping it does not fire. */
     .touch-joystick-turn {
       width: 130px;
       height: 56px;
@@ -709,14 +708,11 @@
         <div class="touch-controls">
           <div class="touch-controls-row">
             <!-- Twin-stick: left stick moves (forward/back + strafe left/
-                 right), right stick turns and doubles as Fire -- touching
-                 it down dispatches Control for a single tap, so a tap is
-                 one shot and dragging turns instead. tc-fire (stacked
-                 above the pill below) is an *additional* dedicated Fire
-                 button, not a replacement -- see bindHoldButton's call
-                 site below. Left as-is (not hidden) in menu mode too --
-                 it's inert there, and hiding/showing just this one piece
-                 wasn't worth the extra bookkeeping. -->
+                 right), right stick turns. Firing is tc-fire (stacked
+                 above the pill below), a dedicated Fire button -- see
+                 bindHoldButton's call site below. Left as-is (not hidden)
+                 in menu mode too -- it's inert there, and hiding/showing
+                 just this one piece wasn't worth the extra bookkeeping. -->
             <div class="touch-joystick" id="tc-move-joystick" aria-label="Move / strafe">
               <div class="touch-joystick-knob" id="tc-move-joystick-knob"></div>
               <span class="touch-joystick-label">Move</span>
@@ -740,22 +736,18 @@
               </div>
               <!-- tc-fire is a sibling of the joystick element
                    (tc-turn-joystick), not a descendant of it, so the turn
-                   stick's own pointerdown listeners (setupStick and
-                   setupTurnStickTap, attached to the joystick itself)
-                   never see taps on this button. -->
+                   stick's own pointerdown listeners (setupStick, attached
+                   to the joystick itself) never see taps on this button. -->
               <div class="touch-fire-turn-col">
-                <!-- A real hold button (bindHoldButton, same as USE), not
-                     a tap-only one: the automatic weapons (machine gun,
-                     chaingun) fire for as long as bt_attack stays held,
-                     same as a real Ctrl key would -- the pill's own
-                     tap-to-fire is one shot per tap, so without this
-                     there was no way to hold down automatic fire by
-                     touch at all. Purely additive: the pill's tap-to-fire
-                     still works exactly as before. -->
+                <!-- A real hold button (bindHoldButton, same as USE): the
+                     automatic weapons (machine gun, chaingun) fire for as
+                     long as bt_attack stays held, same as a real Ctrl key
+                     would. This is the only touch fire control -- the turn
+                     stick itself is turn-only. -->
                 <button class="touch-btn touch-btn-small touch-btn-fire" id="tc-fire" aria-label="Fire">AUTO</button>
-                <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn / fire">
+                <div class="touch-joystick touch-joystick-turn" id="tc-turn-joystick" aria-label="Turn">
                   <div class="touch-joystick-knob touch-joystick-knob-turn" id="tc-turn-joystick-knob"></div>
-                  <span class="touch-joystick-label">Turn / Fire</span>
+                  <span class="touch-joystick-label">Turn</span>
                 </div>
               </div>
             </div>
@@ -1760,19 +1752,17 @@
     // ---- 6. Input bridge, part 3: the physical touch controls ----
     // The actual on-screen joysticks and buttons drawn in the HTML
     // above: a shared drag-tracking helper (setupStick) powers both
-    // the move and turn sticks, a tap-vs-drag helper turns the turn
-    // stick into a dual-purpose fire button, and a plain hold-button
-    // helper covers USE. Unlike part 1's synthesized keypresses, most
-    // of these call dedicated assist_set_*/assist_switch_weapon
-    // exports (wl_game.cpp) directly -- proportional analog input has
-    // no keyboard equivalent to fake.
+    // the move and turn sticks, and a plain hold-button helper covers
+    // USE and Fire. Unlike part 1's synthesized keypresses, most of
+    // these call dedicated assist_set_*/assist_switch_weapon exports
+    // (wl_game.cpp) directly -- proportional analog input has no
+    // keyboard equivalent to fake.
     // ---- Touch/mobile controls ----
     // A real hold button (as long as your finger is down, the key is
     // down), not a tap -- Use needs continuous key state to work like the
     // physical control it's standing in for, and so does AUTO (Fire) for
-    // automatic weapons: the turn stick's own tap-to-fire (setupTurnStickTap,
-    // below) is one shot per tap, with no way to hold it down, so a
-    // machine gun/chaingun burst needed a real hold button of its own.
+    // automatic weapons: a machine gun/chaingun burst needs the key held
+    // down, not a single tap.
     function bindHoldButton(el, keyName) {
       var active = false;
       var k = KEYS[keyName];
@@ -1795,12 +1785,11 @@
       el.addEventListener("pointerleave", release);
     }
     bindHoldButton(document.getElementById("tc-use"), "Space");
-    // Dedicated Fire button (see the HTML comment above tc-fire): the same
-    // real Fire key (Control) the turn stick's own tap-to-fire dispatches,
-    // just held for as long as the button is down instead of a fixed
-    // 70ms tap -- Wolf4SDL's own attack-state handling is what actually
-    // decides single-shot vs. automatic from there, exactly as it would
-    // for a held keyboard key.
+    // Dedicated Fire button (see the HTML comment above tc-fire): dispatches
+    // the real Fire key (Control) for as long as the button is down --
+    // Wolf4SDL's own attack-state handling is what actually decides
+    // single-shot vs. automatic from there, exactly as it would for a held
+    // keyboard key.
     bindHoldButton(document.getElementById("tc-fire"), "Control");
 
     // Shared drag-tracking behind both touch sticks below: pointer capture,
@@ -2115,153 +2104,13 @@
       queueCcall("assist_set_move", null, ["number", "number"], [dx, dy]);
     });
 
-    // Right stick: turn, and doubles as Fire -- but only for an actual
-    // tap, not a hold-to-turn. Confirmed unwanted: firing for the entire
-    // duration a hold is down (matching the old dedicated FIRE button's
-    // hold-to-fire behavior) burns ammo just from turning, since turning
-    // *is* holding the stick down.
-    //
-    // turnStickDragged (set by setupTurnStickTap below) is the same "has
-    // this touch moved past the tap threshold" flag that decides whether
-    // release fires -- reused here so a tap doesn't *also* turn. Without
-    // this, setupStick's update() computes turn from distance to this
-    // touch's own origin starting on the very first pointerdown frame, so
-    // *any* movement at all (including the couple of pixels a real tap
-    // never lands perfectly still through) would nudge the view before
-    // the tap/drag distinction below ever got a say.
-    var turnStickDragged = false;
+    // Right stick: turn only. Firing is the dedicated tc-fire button
+    // (bindHoldButton above), not this stick -- a tap-to-fire pill was
+    // tried and removed: it made a tap on the stick fire, which was easy
+    // to trigger by accident while just trying to turn.
     setupStick("tc-turn-joystick", "tc-turn-joystick-knob", 36, 6, function (dx) {
-      queueCcall("assist_set_turn", null, ["number"], [turnStickDragged ? dx : 0]); // fire-and-forget, see the move stick's own comment above
-    }, function onStart() {
-      // Runs before this pointerdown's first update()/onMove() above, so
-      // clearing the flag here (rather than in setupTurnStickTap's own
-      // pointerdown handler below) guarantees a fresh touch never inherits
-      // "dragged" from the gesture before it, regardless of which of the
-      // two pointerdown listeners on this element happens to run first.
-      turnStickDragged = false;
-    }, null, true /* xOnly */);
-
-    // Tap-to-fire, tracked independently of setupStick's own drag/deflection
-    // handling above -- reusing that deflection value (distance from this
-    // touch's own origin) to tell a tap from a drag is wrong: the origin
-    // *is* wherever the touch started, so it's zero on the very first
-    // frame regardless of tap vs. drag, and only diverges once real
-    // movement happens -- exactly the ambiguity turnStickDragged above
-    // exists to resolve, not something to re-derive from the same value a
-    // second way. This instead tracks distance from wherever *this touch
-    // itself* started using its own independent listeners, so a tap fires
-    // reliably no matter where on the stick it lands.
-    (function setupTurnStickTap() {
-      var el = document.getElementById("tc-turn-joystick");
-      var TAP_MOVE_THRESHOLD = 16; // px moved from this touch's own start before it counts as a drag, not a tap
-      var pointerId = null, startX = 0;
-      // Same touch-identifier tracking as setupStick's own touchId, and
-      // for the same reason -- this is a wholly separate closure with its
-      // own window-level touchmove listener on the same element, so it
-      // needs its own way to tell this gesture's finger apart from
-      // whatever else is touching the page (see setupStick's touchId
-      // comment for the full "right stick moved the left stick" story).
-      var touchId = null;
-      // False until startX holds a real coordinate -- see the
-      // zeroed-pointerdown handling below.
-      var startXSet = false;
-      // Same per-gesture source tracking as setupStick's own touchmove
-      // fallback, and for the same reason: this tap-vs-drag distinction is
-      // its own independent pointermove listener (separate from
-      // setupStick's), so it needs its own fallback -- and a hard-zeroed
-      // pointermove here is actually worse than in setupStick, since
-      // dx = 0 - startX reads as a huge drag on the very first bad frame,
-      // misfiring "drag" instead of just misreading distance, so a tap
-      // would never fire at all during the zeroed-coordinate window.
-      var activeSource = null;
-
-      el.addEventListener("pointerdown", function (e) {
-        pointerId = e.pointerId;
-        // Cleared here for the same reason as setupStick's own -- see
-        // its comment.
-        touchId = null;
-        activeSource = null;
-        turnStickDragged = false;
-        // Confirmed on a Kindle Fire: pointerdown itself can report the
-        // same hard-zeroed coordinates as pointermove -- see setupStick's
-        // pointerdown handler for the full story. Trusting a zeroed
-        // startX here made dx = realX - 0 always read as a huge
-        // rightward drag from frame one, which (independent of
-        // setupStick's own origin bug) would also explain a tap
-        // misfiring as "dragged" every time. Deferring to the first real
-        // coordinate instead, same as setupStick does.
-        if (e.clientX === 0 && e.clientY === 0) { startXSet = false; return; }
-        startX = e.clientX;
-        startXSet = true;
-      });
-      el.addEventListener("touchstart", function (e) {
-        if (e.changedTouches.length) touchId = e.changedTouches[0].identifier;
-      }, { passive: true });
-      function findOwnTouch(touchList) {
-        if (touchId === null) return null;
-        for (var i = 0; i < touchList.length; i++) {
-          if (touchList[i].identifier === touchId) return touchList[i];
-        }
-        return null;
-      }
-      window.addEventListener("pointermove", function (e) {
-        if (e.pointerId !== pointerId) return;
-        // See setupStick's pointermove listener for the full story on
-        // Silk's hard-zeroed pointermove bug -- same rejection here.
-        if (e.clientX === 0 && e.clientY === 0) {
-          if (activeSource === "pointer") activeSource = null;
-          return;
-        }
-        if (!startXSet) { startX = e.clientX; startXSet = true; }
-        if (activeSource === null) activeSource = "pointer";
-        if (activeSource !== "pointer") return;
-        // Horizontal distance only, matching setupStick's own xOnly turn
-        // this control uses -- a finger drifting vertically on the pill
-        // doesn't turn anything, so it shouldn't cancel the tap either.
-        var dx = e.clientX - startX;
-        if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
-      });
-      // touchmove fallback, keyed to the same per-gesture activeSource as
-      // setupStick's -- see its comment for why this can't be a permanent
-      // latch (Silk's pointermove is unreliable within a single gesture,
-      // not simply absent) nor unconditionally live alongside pointermove
-      // (iOS fires both, out of step with each other).
-      window.addEventListener("touchmove", function (e) {
-        if (pointerId === null) return;
-        var touch = findOwnTouch(e.touches);
-        if (!touch) return;
-        if (activeSource === null) activeSource = "touch";
-        if (activeSource !== "touch") return;
-        if (!startXSet) { startX = touch.clientX; startXSet = true; }
-        var dx = touch.clientX - startX;
-        if (Math.abs(dx) > TAP_MOVE_THRESHOLD) turnStickDragged = true;
-      });
-      function endTap() {
-        pointerId = null;
-        touchId = null;
-        if (!turnStickDragged) tap("Control");
-      }
-      window.addEventListener("pointerup", function (e) {
-        if (e.pointerId !== pointerId) return;
-        endTap();
-      });
-      // Safety net alongside pointerup above -- see setupStick's own
-      // touchend/touchcancel listeners for why a stuck pointerId here is
-      // a real risk on this device, not just a hypothetical. A stuck
-      // pointerId would otherwise leave this tap-vs-drag tracker "active"
-      // indefinitely, ready to misread the next unrelated touch's
-      // horizontal movement as this gesture's own.
-      window.addEventListener("touchend", function (e) {
-        if (!findOwnTouch(e.changedTouches)) return;
-        endTap();
-      });
-      window.addEventListener("touchcancel", function (e) {
-        if (!findOwnTouch(e.changedTouches)) return;
-        // A cancelled touch is not a completed tap.
-        pointerId = null;
-        touchId = null;
-      });
-    })();
+      queueCcall("assist_set_turn", null, ["number"], [dx]); // fire-and-forget, see the move stick's own comment above
+    }, null, null, true /* xOnly */);
 
     // ---- 7. Control-mode switch: keyboard legend vs. touch controls ----
     // Manual override for the auto-detect in <style> (the
