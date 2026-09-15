@@ -2112,6 +2112,174 @@
       queueCcall("assist_set_turn", null, ["number"], [dx]); // fire-and-forget, see the move stick's own comment above
     }, null, null, true /* xOnly */);
 
+    // ---- Wired USB / Bluetooth gamepad support ----
+    // Ported from doom-assist's own gamepad support (same idea, same
+    // W3C "standard gamepad" button layout, confirmed there against real
+    // Xbox-controller hardware) -- adapted here to go through queueCcall
+    // instead of a raw Module.ccall, same as every other engine call in
+    // this file. That's not a style choice: a sync ccall landing while
+    // the engine is mid-Asyncify-yield is the exact reentrancy hang this
+    // project already root-caused and fixed once (see "Engine call queue"
+    // below and the long comment on SDL_CreateRenderer in id_vl.cpp) --
+    // polling a gamepad every animation frame is exactly the kind of
+    // uncoordinated caller that bug class needs, so a new call site here
+    // has to use queueCcall or it can reintroduce that hang for this one
+    // site. The Gamepad API itself has no "axis changed"/"button changed"
+    // event -- browsers only fire gamepadconnected/gamepaddisconnected --
+    // so this drives its own requestAnimationFrame poll of
+    // navigator.getGamepads() rather than hanging anything off an event
+    // listener.
+    //
+    // Button indices below (RT=7, RB=5, Start/Menu=9, View/Back=8, D-pad
+    // up/down/left/right=12/13/14/15) are the W3C "standard gamepad"
+    // mapping (https://w3c.github.io/gamepad/#remapping) -- the layout a
+    // wired Xbox controller reports and what Chrome/Edge/Firefox
+    // normalize known controllers to. A controller the browser can't
+    // recognize may report a different order; there's no way to detect
+    // that from here, so this just assumes the common (confirmed
+    // elsewhere) case.
+    var gpButtonState = {}; // button index -> was it down last frame?
+    var GP_DEADZONE = 0.15; // stick drift well inside this on most pads at rest
+
+    // Escape and Enter are picked deliberately, not arbitrarily, because
+    // real Wolf4SDL keyboard input already gives both exactly the meaning
+    // an Xbox pad's View/Menu buttons should have, with no extra JS logic
+    // needed: CheckKeys (wl_play.cpp) opens the in-game control-panel
+    // menu on sc_Escape, the same as a keyboard player pressing Escape
+    // to pause; Enter has no gameplay binding at all (safe to send any
+    // time) but is read by HandleMenu (wl_menu.cpp) to confirm a menu
+    // item, and by IN_UserInput's IN_CheckAck (id_in.cpp) -- along with
+    // every other key -- to dismiss the title screen's attract-mode demo
+    // loop, the same "just send Enter" trick the canvas tap-to-select
+    // handler above already relies on. D-pad -> arrow keys for the same
+    // reason: dirscan (wl_play.cpp) reads the arrow keys for keyboard
+    // movement, and HandleMenu's ci.dir comes from that same arrow-key
+    // state, so one mapping covers both menu navigation and a keyboard-
+    // style movement fallback. There's no automap toggle to bind (unlike
+    // doom-assist's Y -- Wolf3D has no equivalent to Doom's in-engine
+    // automap overlay, just the separate MAP tab in the sidebar), so Y/X/B
+    // are left unbound.
+    var GP_KEY_BUTTONS = {
+      0: "Space",       // A -- Use, same real key the touch Use button uses
+      7: "Control",     // Right trigger (RT) -- Fire, same real key the touch Fire button uses
+      8: "Escape",      // View/Back -- opens/closes the in-game menu, same as a keyboard Escape
+      9: "Enter",       // Menu/Start -- confirm a menu item, dismiss the attract-mode demo
+      12: "UpArrow",    // D-pad up -- menu navigation + keyboard-style movement (dirscan)
+      13: "DownArrow",  // D-pad down
+      14: "LeftArrow",  // D-pad left
+      15: "RightArrow"  // D-pad right
+    };
+
+    // Weapon-next has no bound key at all in this codebase (see tc-weapon's
+    // own comment above) -- same direct export used there, called once
+    // per press through queueCcall rather than through dispatchKey.
+    var GP_WEAPON_BUTTONS = [5]; // RB
+
+    // Inverted once up front: key name -> every button index that maps to
+    // it. pollGamepad tracks down/up state per *key*, not per button, so
+    // two buttons sharing a key resolves correctly (one keydown when the
+    // first goes down, one keyup only once *all* of them are back up) --
+    // not needed right now (every key above has exactly one source), but
+    // it's the same mechanism doom-assist keeps for the same reason: it
+    // fixed a real dropped-fire bug there the last time two buttons
+    // shared "Control" on a different controller.
+    var GP_KEY_TO_BUTTONS = {};
+    for (var gpIdx in GP_KEY_BUTTONS) {
+      var gpKeyName = GP_KEY_BUTTONS[gpIdx];
+      (GP_KEY_TO_BUTTONS[gpKeyName] = GP_KEY_TO_BUTTONS[gpKeyName] || []).push(gpIdx);
+    }
+    var gpKeyState = {}; // key name -> was the aggregate (any mapped button) down last frame?
+
+    // Picks which connected pad actually drives the game this frame:
+    // whichever slot currently has a deflected axis or a held button,
+    // falling back to the first connected slot when nothing is active
+    // (so movement still zeroes out correctly on release) -- guards
+    // against a silent decoy device squatting on slot 0 while the real
+    // controller sits in a later slot (a real finding from doom-assist's
+    // own hardware testing, ported alongside the rest of this).
+    function pickControlPad(pads) {
+      var fallback = null;
+      for (var i = 0; i < pads.length; i++) {
+        var p = pads[i];
+        if (!p) continue;
+        if (!fallback) fallback = p;
+        for (var a = 0; a < p.axes.length; a++) {
+          if (Math.abs(p.axes[a]) > 0.05) return p;
+        }
+        for (var b = 0; b < p.buttons.length; b++) {
+          if (p.buttons[b] && p.buttons[b].pressed) return p;
+        }
+      }
+      return fallback;
+    }
+
+    function pollGamepad() {
+      requestAnimationFrame(pollGamepad);
+      var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      var pad = pickControlPad(pads);
+      if (!pad) return;
+
+      // Left stick: move + strafe, right stick: turn -- identical meaning
+      // to the touch sticks feeding these same two exports just above. A
+      // gamepad axis already reports -1..1 with "up" as negative Y, the
+      // same sign convention those touch sticks' screen-space dy uses, so
+      // no inversion is needed here.
+      var lx = pad.axes[0] || 0, ly = pad.axes[1] || 0, rx = pad.axes[2] || 0;
+      if (Math.abs(lx) < GP_DEADZONE) lx = 0;
+      if (Math.abs(ly) < GP_DEADZONE) ly = 0;
+      if (Math.abs(rx) < GP_DEADZONE) rx = 0;
+      // Fire-and-forget through queueCcall, same as the touch sticks --
+      // see the move stick's own comment above.
+      queueCcall("assist_set_move", null, ["number", "number"], [Math.round(lx * 100), Math.round(ly * 100)]);
+      queueCcall("assist_set_turn", null, ["number"], [Math.round(rx * 100)]);
+
+      for (var keyName in GP_KEY_TO_BUTTONS) {
+        var btnIdxs = GP_KEY_TO_BUTTONS[keyName];
+        var down = false;
+        for (var bi = 0; bi < btnIdxs.length; bi++) {
+          if (pad.buttons[btnIdxs[bi]] && pad.buttons[btnIdxs[bi]].pressed) { down = true; break; }
+        }
+        if (down === !!gpKeyState[keyName]) continue; // no change since last frame
+        gpKeyState[keyName] = down;
+        var k = KEYS[keyName];
+        document.getElementById("canvas").focus();
+        dispatchKey(down ? "keydown" : "keyup", k[0], k[1], k[2]);
+      }
+
+      for (var wi = 0; wi < GP_WEAPON_BUTTONS.length; wi++) {
+        var wIdx = GP_WEAPON_BUTTONS[wi];
+        var weaponDown = !!(pad.buttons[wIdx] && pad.buttons[wIdx].pressed);
+        if (weaponDown && !gpButtonState[wIdx]) {
+          queueCcall("assist_switch_weapon", null, [], []); // fire-and-forget, like tc-weapon's own binding above
+        }
+        gpButtonState[wIdx] = weaponDown;
+      }
+    }
+
+    // Start the poll loop unconditionally at load, rather than waiting
+    // for gamepadconnected to fire first. That event is unreliable as a
+    // *trigger*: Chrome/Edge won't report a controller that was already
+    // plugged in before the page loaded until the browser actually sees
+    // a button press or stick move on it (privacy hardening against
+    // passive device fingerprinting) -- so gating the whole loop behind
+    // the event would mean a controller plugged in ahead of time never
+    // does anything, since nothing is polling to notice that first
+    // button press either. pollGamepad() itself is a no-op every frame
+    // navigator.getGamepads() reports nothing, so running it from the
+    // start costs nothing and has no failure mode to gate against.
+    pollGamepad();
+
+    window.addEventListener("gamepadconnected", function (e) {
+      toast("Controller connected: " + e.gamepad.id);
+    });
+    window.addEventListener("gamepaddisconnected", function (e) {
+      toast("Controller disconnected");
+      gpButtonState = {};
+      gpKeyState = {};
+      queueCcall("assist_set_move", null, ["number", "number"], [0, 0]);
+      queueCcall("assist_set_turn", null, ["number"], [0]);
+    });
+
     // ---- 7. Control-mode switch: keyboard legend vs. touch controls ----
     // Manual override for the auto-detect in <style> (the
     // `(pointer: coarse) and (not (any-pointer: fine))` media query).
