@@ -144,16 +144,26 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned char *assist_get_map(void)
             //
             // ELEVATORTILE only -- ALTELEVATORTILE is deliberately NOT
             // checked here despite being the other constant in that same
-            // wl_agent.cpp check. It isn't a second placed exit tile at
-            // all: wl_def.h defines it identically to AREATILE ("first of
+            // wl_agent.cpp check. It isn't a placed exit tile at all:
+            // wl_def.h defines it identically to AREATILE ("first of
             // NUMAREAS floor tiles"), and wl_agent.cpp only ever reads it
-            // at the *player's own tile* at the moment they use the one
-            // real elevator, purely to decide whether that leads to a
-            // normal "completed" or "secret level" ending. Treating it as
-            // an exit location here flagged an ordinary floor cell
+            // at the *player's own tile* at the moment they use whichever
+            // elevator they found, purely to decide whether that leads to
+            // a normal "completed" or "secret level" ending. Treating it
+            // as an exit location here flagged an ordinary floor cell
             // (whichever one the level's area numbering happened to
-            // assign code 107) as a fake second exit -- confirmed live on
-            // level 1, which has exactly one real, reachable elevator.
+            // assign code 107) as a fake extra exit dot -- confirmed live.
+            //
+            // Floor 1 genuinely showing two exit dots on the assist-mode
+            // map is correct, not a symptom of the above: GAMEMAPS.WL1's
+            // own wall plane places two separate ELEVATORTILE switches on
+            // that level (decoded and confirmed directly from the shipped
+            // data/shareware files, independent of any live playtest) --
+            // one for the ordinary level-complete ending, one hidden
+            // behind a pushwall for the bonus secret level. Both are real
+            // and both are reachable; every other shareware floor (2-8,
+            // via wl_agent.cpp's own ex_secretlevel/ex_completed split)
+            // has only the one normal elevator.
             if (tilemap[x][y] == ELEVATORTILE)
                 v = ASSIST_TILE_EXIT;
             assist_map_buf[y * MAPSIZE + x] = v;
