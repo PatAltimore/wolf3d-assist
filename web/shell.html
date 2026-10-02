@@ -2258,8 +2258,7 @@
         el.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#0f0;font:11px monospace;pointer-events:none;max-width:90vw;white-space:pre-wrap";
         document.body.appendChild(el);
       }
-      el.textContent = lines.join("
-");
+      el.textContent = lines.join("\n");
     }
 
     function pollGamepad() {
