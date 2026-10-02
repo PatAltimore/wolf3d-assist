@@ -824,6 +824,9 @@
           <button class="assist-btn" id="cheat-items" title="Full weapons, ammo, health, and points.">Give All</button>
           <button class="assist-btn" id="cheat-map" title="A genuine 1992 developer debug view (Tab+O) of the floor's raw tile data.">Overhead Map</button>
         </div>
+        <div class="cheat-row-compact">
+          <button class="assist-btn" id="cheat-regen" aria-pressed="false" title="Adds 1% health every second, up to 100%.">Regen Health: Off</button>
+        </div>
         <div class="cheat-row">
           <select class="assist-select" id="warp-level"></select>
           <button class="assist-btn" id="cheat-warp">Warp</button>
@@ -1564,6 +1567,15 @@
       runDebugCheat("O");
       toast("Showing overhead map — press any key in-game to close it");
       logAction("cheat:map", "Used the Overhead Map cheat", DEBUG_KEYS_LINK);
+    });
+    var regenOn = false;
+    document.getElementById("cheat-regen").addEventListener("click", function () {
+      regenOn = !regenOn;
+      Module.ccall("assist_set_regen", null, ["number"], [regenOn ? 1 : 0]);
+      this.textContent = "Regen Health: " + (regenOn ? "On" : "Off");
+      this.setAttribute("aria-pressed", regenOn ? "true" : "false");
+      toast(regenOn ? "Regenerating 1% health per second" : "Health regen off");
+      logAction("cheat:regen", regenOn ? "Enabled Regen Health" : "Disabled Regen Health");
     });
     document.getElementById("cheat-warp").addEventListener("click", function () {
       var lvl = warpSelect.value;

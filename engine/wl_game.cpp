@@ -315,6 +315,32 @@ int assist_get_strafe_dx(void) { return assist_move_dx; }
 //     open menu (e.g. the in-game Esc menu), so it's a genuinely separate
 //     condition from ingame, not implied by it.
 //   - demoplayback (wl_def.h) is the other half of the ingame gap above.
+// Regenerate-health cheat: while enabled, +1 health per second of real
+// play (70 tics), capped at 100 by HealSelf. Ticked from PlayLoop.
+static int assist_regen_on = 0;
+static int assist_regen_tics = 0;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void assist_set_regen(int on)
+{
+    assist_regen_on = on ? 1 : 0;
+    assist_regen_tics = 0;
+}
+
+void assist_regen_tick(int t)
+{
+    if (!assist_regen_on || gamestate.health <= 0 || gamestate.health >= 100)
+    {
+        assist_regen_tics = 0;
+        return;
+    }
+    assist_regen_tics += t;
+    while (assist_regen_tics >= 70)
+    {
+        assist_regen_tics -= 70;
+        HealSelf(1);
+    }
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_ingame(void) { return ingame ? 1 : 0; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_menuactive(void) { return menuactive ? 1 : 0; }
 extern "C" EMSCRIPTEN_KEEPALIVE int assist_get_demoplayback(void) { return demoplayback ? 1 : 0; }
