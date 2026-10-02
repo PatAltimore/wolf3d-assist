@@ -2265,7 +2265,29 @@
       if (!el) {
         el = document.createElement("pre");
         el.id = "gp-debug";
-        el.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#0f0;font:11px monospace;pointer-events:none;max-width:90vw;white-space:pre-wrap";
+        el.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#0f0;font:11px monospace;max-width:90vw;white-space:pre-wrap;cursor:pointer";
+        // Tap/click copies the current text (same clipboard-then-textarea
+        // fallback as the touch log's Copy button above).
+        el.addEventListener("click", function () {
+          var text = el.textContent;
+          function fallbackCopy() {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = false;
+            try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+            document.body.removeChild(ta);
+            toast(ok ? "Copied" : "Copy failed");
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () { toast("Copied"); }, fallbackCopy);
+          } else {
+            fallbackCopy();
+          }
+        });
         document.body.appendChild(el);
       }
       el.textContent = lines.join("\n");
