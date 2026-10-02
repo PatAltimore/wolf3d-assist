@@ -2246,11 +2246,21 @@
     // send on change.
     var gpSent = { mx: null, my: null, tx: null };
 
-    function gpDebugUpdate(pad) {
+    var gpEvents = 0; // gamepadconnected events seen, shown in the debug overlay
+    function gpDebugUpdate(pad, pads) {
       if (!DEBUG_TOUCH) return;
-      var lines = ["PAD " + pad.index + " mapping=" + (pad.mapping || "(none)") + " id=" + pad.id,
-        "axes: " + Array.prototype.map.call(pad.axes, function (a) { return a.toFixed(2); }).join(" "),
-        "btns: " + Array.prototype.map.call(pad.buttons, function (b, i) { return b.pressed || b.value > 0.5 ? i : ""; }).join(" ").replace(/\s+/g, " ")];
+      var lines = ["GAMEPAD API: " + (navigator.getGamepads ? "yes" : "NO") +
+        "  slots=" + (pads ? pads.length : 0) +
+        "  connected=" + (pads ? Array.prototype.filter.call(pads, Boolean).length : 0) +
+        "  events=" + gpEvents +
+        "  focus=" + document.hasFocus()];
+      if (pad) {
+        lines.push("PAD " + pad.index + " mapping=" + (pad.mapping || "(none)") + " id=" + pad.id,
+          "axes: " + Array.prototype.map.call(pad.axes, function (a) { return a.toFixed(2); }).join(" "),
+          "btns: " + Array.prototype.map.call(pad.buttons, function (b, i) { return b.pressed || b.value > 0.5 ? i : ""; }).join(" ").replace(/\s+/g, " "));
+      } else {
+        lines.push("no pad reported -- click the page, then press a button on the controller");
+      }
       var el = document.getElementById("gp-debug");
       if (!el) {
         el = document.createElement("pre");
@@ -2266,8 +2276,8 @@
       var pads;
       try { pads = navigator.getGamepads ? navigator.getGamepads() : []; } catch (e) { return; }
       var pad = pickControlPad(pads);
+      gpDebugUpdate(pad, pads);
       if (!pad || pad.connected === false) return;
-      gpDebugUpdate(pad);
 
       // Left stick: move + strafe, right stick: turn -- identical meaning
       // to the touch sticks feeding these same two exports just above. A
@@ -2328,6 +2338,7 @@
     pollGamepad();
 
     window.addEventListener("gamepadconnected", function (e) {
+      gpEvents++;
       toast("Controller connected" + (e.gamepad.mapping === "standard" ? "" : " (non-standard layout)") + ": " + e.gamepad.id);
     });
     window.addEventListener("gamepaddisconnected", function (e) {
