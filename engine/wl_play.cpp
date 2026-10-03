@@ -92,7 +92,7 @@ void StartMusic (void);
 void ContinueMusic (int offs);
 void PlayLoop (void);
 #ifdef __EMSCRIPTEN__
-void assist_regen_tick (int t); // wl_game.cpp: regenerate-health cheat
+void assist_regen_tick (void); // wl_game.cpp: regenerate-health cheat
 #endif
 
 /*
@@ -1313,7 +1313,7 @@ void PlayLoop (void)
 
         gamestate.TimeCount += tics;
 #ifdef __EMSCRIPTEN__
-        assist_regen_tick (tics);
+        assist_regen_tick ();
 #endif
 
         UpdateSoundLoc ();      // JAB
