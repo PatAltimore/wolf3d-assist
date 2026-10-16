@@ -1,6 +1,6 @@
 # wolf3d-assist
 
-A browser-playable build of the original 1992 *Wolfenstein 3D*, with an "assist mode" sidebar (cheats, a fog-of-war explored map, per-floor hints) that links out to [Code Museum](https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d)'s annotated source pages for the underlying code.
+A browser-playable build of the original 1992 *Wolfenstein 3D*, with an "assist mode" sidebar (cheats, a fog-of-war explored map, per-floor hints) that links out to [Code Museum](https://pataltimore.github.io/code-museum/#/wolf3d)'s annotated source pages for the underlying code.
 
 **Live:** https://pataltimore.github.io/wolf3d-assist/
 
