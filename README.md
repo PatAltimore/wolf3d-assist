@@ -2,14 +2,14 @@
 
 A browser-playable build of the original 1992 *Wolfenstein 3D*, with an "assist mode" sidebar (cheats, a fog-of-war explored map, per-floor hints) that links out to [Code Museum](https://blue-rock-0e6a0831e.7.azurestaticapps.net/#/wolf3d)'s annotated source pages for the underlying code.
 
-**Live:** https://ashy-forest-06f3c1f1e.7.azurestaticapps.net/
+**Live:** https://pataltimore.github.io/wolf3d-assist/
 
 ## What's here
 
 - `engine/` — a fork of [fabiangreffrath/wolf4sdl](https://github.com/fabiangreffrath/wolf4sdl) (a portable SDL2 port of [id-Software/wolf3d](https://github.com/id-Software/wolf3d)), compiled to WebAssembly via Emscripten. A few small patches on top: `DebugOk` defaults on (so assist-mode cheats work without the original 3-key unlock combo), and a handful of `assist_get_*` exports the JS side polls for live level/position/map data.
 - `web/shell.html` — the custom Emscripten shell: the assist-mode UI (cheats, hints, explored map) wrapped around the game canvas.
 - `data/shareware/` — the original 1992 shareware episode data files (`*.WL1`). id Software has permitted free redistribution of these since the game shipped as shareware; the full registered game's data is not included (and isn't bundled/downloadable from here).
-- `staticwebapp.config.json`, `.github/workflows/azure-static-web-apps.yml` — Azure Static Web Apps (free tier) deployment.
+- `.github/workflows/pages.yml` — GitHub Pages deployment.
 
 ## Running locally
 
@@ -35,7 +35,7 @@ If `tools/emsdk` already exists (e.g. from a previous setup), skip straight to s
 
 ## Deployment
 
-Pushing to `main` triggers `.github/workflows/azure-static-web-apps.yml`, which builds the engine fresh in CI and deploys the result to Azure Static Web Apps using the `AZURE_STATIC_WEB_APPS_API_TOKEN` repo secret.
+Pushing to `main` triggers `.github/workflows/pages.yml`, which builds the engine fresh in CI and deploys the result to GitHub Pages (repo Settings → Pages → Source must be "GitHub Actions").
 
 ## License / credits
 
