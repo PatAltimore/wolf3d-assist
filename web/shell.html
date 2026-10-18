@@ -2308,7 +2308,7 @@
           gpLog.push(t + "s axis " + a + " -> " + pad.axes[a].toFixed(2));
         }
       }
-      if (gpLog.length > 14) gpLog.splice(0, gpLog.length - 14);
+      if (gpLog.length > 40) gpLog.splice(0, gpLog.length - 40);
     }
 
     function gpDebugUpdate(pad, pads) {
@@ -2332,7 +2332,7 @@
       if (!el) {
         el = document.createElement("pre");
         el.id = "gp-debug";
-        el.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#0f0;font:11px monospace;max-width:90vw;white-space:pre-wrap;cursor:pointer";
+        el.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#0f0;font:11px monospace;max-width:90vw;max-height:50vh;overflow:auto;white-space:pre-wrap;cursor:pointer";
         // Tap/click copies the current text (same clipboard-then-textarea
         // fallback as the touch log's Copy button above).
         el.addEventListener("click", function () {
