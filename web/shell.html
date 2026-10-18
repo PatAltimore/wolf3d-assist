@@ -2171,7 +2171,7 @@
     // doom-assist's Y -- Wolf3D has no equivalent to Doom's in-engine
     // automap overlay, just the separate MAP tab in the sidebar), so Y/X/B
     // are left unbound.
-    var GP_KEY_BUTTONS = {
+    var GP_STANDARD_KEY_BUTTONS = {
       0: "Space",       // A -- Use, same real key the touch Use button uses
       7: "Control",     // Right trigger (RT) -- Fire, same real key the touch Fire button uses
       8: "Escape",      // View/Back -- opens/closes the in-game menu, same as a keyboard Escape
@@ -2185,7 +2185,7 @@
     // Weapon-next has no bound key at all in this codebase (see tc-weapon's
     // own comment above) -- same direct export used there, called once
     // per press through queueCcall rather than through dispatchKey.
-    var GP_WEAPON_BUTTONS = [5]; // RB
+    var GP_STANDARD_WEAPON_BUTTONS = [5]; // RB
 
     // Inverted once up front: key name -> every button index that maps to
     // it. pollGamepad tracks down/up state per *key*, not per button, so
@@ -2195,10 +2195,32 @@
     // it's the same mechanism doom-assist keeps for the same reason: it
     // fixed a real dropped-fire bug there the last time two buttons
     // shared "Control" on a different controller.
-    var GP_KEY_TO_BUTTONS = {};
-    for (var gpIdx in GP_KEY_BUTTONS) {
-      var gpKeyName = GP_KEY_BUTTONS[gpIdx];
-      (GP_KEY_TO_BUTTONS[gpKeyName] = GP_KEY_TO_BUTTONS[gpKeyName] || []).push(gpIdx);
+    function gpBuildLayout(name, keyButtons, weaponButtons, fireButtons, rightXAxis) {
+      var keyToButtons = {};
+      for (var idx in keyButtons) {
+        var kn = keyButtons[idx];
+        (keyToButtons[kn] = keyToButtons[kn] || []).push(+idx);
+      }
+      return { name: name, keyToButtons: keyToButtons, weaponButtons: weaponButtons,
+               fireButtons: fireButtons, rightXAxis: rightXAxis };
+    }
+    var GP_STANDARD_LAYOUT = gpBuildLayout("standard", GP_STANDARD_KEY_BUTTONS,
+      GP_STANDARD_WEAPON_BUTTONS, [7], null);
+
+    // Per-controller layout overrides, matched against Gamepad.id. The
+    // Xbox "nano" is the reason this exists: it doesn't report the same
+    // button order as a regular Xbox pad. Add an entry here once the
+    // debug overlay (?debug=1) shows what it really reports, e.g.:
+    //   { match: /nano/i, layout: gpBuildLayout("nano", {...key map...}, [..weapon..], [..fire..], 3) }
+    // rightXAxis (or null to use the default heuristics) names the axis
+    // index of the right stick's X.
+    var GP_PROFILES = [];
+
+    function gpLayoutFor(pad) {
+      for (var i = 0; i < GP_PROFILES.length; i++) {
+        if (GP_PROFILES[i].match.test(pad.id)) return GP_PROFILES[i].layout;
+      }
+      return GP_STANDARD_LAYOUT;
     }
     var gpKeyState = {}; // key name -> was the aggregate (any mapped button) down last frame?
 
@@ -2238,14 +2260,17 @@
     // axes 0/1 and right-stick X is axis 2 (XInput order) or 3 (DirectInput
     // order, where axis 2 is a combined trigger axis); triggers may be
     // axes, not buttons. Standard pads never take these paths.
-    function gpRightX(pad) {
+    function gpRightX(pad, layout) {
+      if (layout.rightXAxis !== null) return pad.axes[layout.rightXAxis] || 0;
       if (pad.mapping === "standard") return pad.axes[2] || 0;
       if (pad.axes.length >= 6) return pad.axes[3] || 0;
       return pad.axes[2] || 0;
     }
-    function gpFireDown(pad) {
-      if (gpDown(pad, 7)) return true;
-      if (pad.mapping !== "standard") {
+    function gpFireDown(pad, layout) {
+      for (var i = 0; i < layout.fireButtons.length; i++) {
+        if (gpDown(pad, layout.fireButtons[i])) return true;
+      }
+      if (layout === GP_STANDARD_LAYOUT && pad.mapping !== "standard") {
         // Triggers reported as axes rest at -1 and travel to +1.
         if (pad.axes.length >= 6 && (pad.axes[5] || 0) > 0.3) return true;
       }
@@ -2259,6 +2284,33 @@
     var gpSent = { mx: null, my: null, tx: null };
 
     var gpEvents = 0; // gamepadconnected events seen, shown in the debug overlay
+
+    // Debug-only rolling log of what the pad actually reports changing --
+    // press each physical control in turn and read off which button/axis
+    // index it lands on. This is how a new controller's layout gets
+    // identified (compare against the standard layout above).
+    var gpLog = [], gpPrevBtn = {}, gpPrevAxis = {};
+    function gpLogChanges(pad) {
+      var t = (performance.now() / 1000).toFixed(1);
+      for (var b = 0; b < pad.buttons.length; b++) {
+        var d = gpDown(pad, b);
+        if (d !== !!gpPrevBtn[b]) {
+          gpPrevBtn[b] = d;
+          gpLog.push(t + "s btn " + b + (d ? " DOWN" : " up") + " v=" + pad.buttons[b].value.toFixed(2));
+        }
+      }
+      for (var a = 0; a < pad.axes.length; a++) {
+        // Quantize to 0.5 steps so a sweeping stick logs a few lines, not hundreds.
+        var q = Math.round(pad.axes[a] * 2) / 2;
+        if (gpPrevAxis[a] === undefined) gpPrevAxis[a] = q;
+        if (q !== gpPrevAxis[a]) {
+          gpPrevAxis[a] = q;
+          gpLog.push(t + "s axis " + a + " -> " + pad.axes[a].toFixed(2));
+        }
+      }
+      if (gpLog.length > 14) gpLog.splice(0, gpLog.length - 14);
+    }
+
     function gpDebugUpdate(pad, pads) {
       if (!DEBUG_TOUCH) return;
       var lines = ["GAMEPAD API: " + (navigator.getGamepads ? "yes" : "NO") +
@@ -2267,9 +2319,12 @@
         "  events=" + gpEvents +
         "  focus=" + document.hasFocus()];
       if (pad) {
+        gpLogChanges(pad);
         lines.push("PAD " + pad.index + " mapping=" + (pad.mapping || "(none)") + " id=" + pad.id,
+          "layout=" + gpLayoutFor(pad).name + " nAxes=" + pad.axes.length + " nBtns=" + pad.buttons.length,
           "axes: " + Array.prototype.map.call(pad.axes, function (a) { return a.toFixed(2); }).join(" "),
-          "btns: " + Array.prototype.map.call(pad.buttons, function (b, i) { return b.pressed || b.value > 0.5 ? i : ""; }).join(" ").replace(/\s+/g, " "));
+          "btns: " + Array.prototype.map.call(pad.buttons, function (b, i) { return b.pressed || b.value > 0.5 ? i : ""; }).join(" ").replace(/\s+/g, " "),
+          "changes:", gpLog.join("\n") ||"(press controls on the pad)");
       } else {
         lines.push("no pad reported -- click the page, then press a button on the controller");
       }
@@ -2318,7 +2373,8 @@
       // gamepad axis already reports -1..1 with "up" as negative Y, the
       // same sign convention those touch sticks' screen-space dy uses, so
       // no inversion is needed here.
-      var lx = pad.axes[0] || 0, ly = pad.axes[1] || 0, rx = gpRightX(pad);
+      var layout = gpLayoutFor(pad);
+      var lx = pad.axes[0] || 0, ly = pad.axes[1] || 0, rx = gpRightX(pad, layout);
       if (Math.abs(lx) < GP_DEADZONE) lx = 0;
       if (Math.abs(ly) < GP_DEADZONE) ly = 0;
       if (Math.abs(rx) < GP_DEADZONE) rx = 0;
@@ -2334,13 +2390,13 @@
         queueCcall("assist_set_turn", null, ["number"], [tx]);
       }
 
-      for (var keyName in GP_KEY_TO_BUTTONS) {
-        var btnIdxs = GP_KEY_TO_BUTTONS[keyName];
+      for (var keyName in layout.keyToButtons) {
+        var btnIdxs = layout.keyToButtons[keyName];
         var down = false;
         for (var bi = 0; bi < btnIdxs.length; bi++) {
           if (gpDown(pad, btnIdxs[bi])) { down = true; break; }
         }
-        if (keyName === "Control" && !down) down = gpFireDown(pad);
+        if (keyName === "Control" && !down) down = gpFireDown(pad, layout);
         if (down === !!gpKeyState[keyName]) continue; // no change since last frame
         gpKeyState[keyName] = down;
         var k = KEYS[keyName];
@@ -2348,8 +2404,8 @@
         dispatchKey(down ? "keydown" : "keyup", k[0], k[1], k[2]);
       }
 
-      for (var wi = 0; wi < GP_WEAPON_BUTTONS.length; wi++) {
-        var wIdx = GP_WEAPON_BUTTONS[wi];
+      for (var wi = 0; wi < layout.weaponButtons.length; wi++) {
+        var wIdx = layout.weaponButtons[wi];
         var weaponDown = gpDown(pad, wIdx);
         if (weaponDown && !gpButtonState[wIdx]) {
           queueCcall("assist_switch_weapon", null, [], []); // fire-and-forget, like tc-weapon's own binding above
